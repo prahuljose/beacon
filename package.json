@@ -1,10 +1,7 @@
 {
   "name": "beacon",
   "version": "0.1.0",
-  "description": "Solar dashboard companion — beacon.dpdns.org",
-  "type": "module",
+  "description": "Solar dashboard — beacon.dpdns.org",
   "private": true,
-  "engines": {
-    "node": ">=18"
-  }
+  "engines": { "node": ">=18" }
 }
