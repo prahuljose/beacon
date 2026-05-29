@@ -1,26 +1,23 @@
-import { semsCall, getStationId } from '../lib/sems.js';
+import { semsCall } from '../lib/sems.js';
 
-/**
- * GET /api/monitor → live station KPIs + inverter snapshot.
- * Returns the `data` block from SEMS' GetMonitorDetailByPowerstationId.
- */
 export default async function handler(req, res) {
+  // Allow browser to send credentials headers from any origin (same-site only in prod)
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Headers',
+    'Content-Type, X-Sems-Email, X-Sems-Password, X-Sems-Station-Id');
+
+  if (req.method === 'OPTIONS') return res.status(204).end();
+
   try {
-    const stationId = getStationId();
-    const body = await semsCall(
+    const { data, stationId } = await semsCall(
+      req,
       'v1/PowerStation/GetMonitorDetailByPowerstationId',
       { powerStationId: stationId },
     );
-    // Edge cache so rapid client polls (15s) don't hammer SEMS during a warm window
-    res.setHeader(
-      'Cache-Control',
-      's-maxage=10, stale-while-revalidate=30',
-    );
-    return res.status(200).json(body.data);
+    res.setHeader('Cache-Control', 's-maxage=10, stale-while-revalidate=30');
+    return res.status(200).json(data.data);
   } catch (err) {
-    console.error('[/api/monitor]', err);
-    return res
-      .status(500)
-      .json({ error: err.message || 'Failed to fetch monitor data' });
+    console.error('[/api/monitor]', err.message);
+    return res.status(err.status || 500).json({ error: err.message });
   }
 }
