@@ -1,148 +1,172 @@
-// ─── Beacon — client logic ────────────────────────────────────────────────────
-// State machine: LOGIN → (authenticate) → DASHBOARD (poll every 15s)
+/* Beacon — client logic  (plain script, no ES modules) */
 
-const POLL_INTERVAL_MS  = 15_000;
-const DEFAULT_STATION   = 'e3c2c54c-c872-4fdb-8147-99381e685cff';
-const KEY = {
-  email:     'beacon_email',
-  password:  'beacon_password',
-  stationId: 'beacon_station_id',
-};
+var POLL_MS       = 15000;
+var DEFAULT_SID   = 'e3c2c54c-c872-4fdb-8147-99381e685cff';
+var LAST          = { liveW:0, today:0, month:0, total:0, cap:0 };
+var pacChart      = null;
+var pollTimer     = null;
 
-// ─── Credential helpers ───────────────────────────────────────────────────────
+/* ── credentials ──────────────────────────────────────────────────────────── */
 
-const getCreds = () => ({
-  email:     localStorage.getItem(KEY.email)     || '',
-  password:  localStorage.getItem(KEY.password)  || '',
-  stationId: localStorage.getItem(KEY.stationId) || DEFAULT_STATION,
-});
-const saveCreds = ({ email, password, stationId }) => {
-  localStorage.setItem(KEY.email,     email);
-  localStorage.setItem(KEY.password,  password);
-  localStorage.setItem(KEY.stationId, stationId || DEFAULT_STATION);
-};
-const clearCreds = () => Object.values(KEY).forEach(k => localStorage.removeItem(k));
-const hasCreds   = () => !!localStorage.getItem(KEY.email) && !!localStorage.getItem(KEY.password);
+function getCreds() {
+  return {
+    email:     localStorage.getItem('b_email')    || '',
+    password:  localStorage.getItem('b_pass')     || '',
+    stationId: localStorage.getItem('b_sid')      || DEFAULT_SID,
+  };
+}
+function saveCreds(e, p, s) {
+  localStorage.setItem('b_email', e);
+  localStorage.setItem('b_pass',  p);
+  localStorage.setItem('b_sid',   s || DEFAULT_SID);
+}
+function clearCreds() {
+  ['b_email','b_pass','b_sid'].forEach(function(k){ localStorage.removeItem(k); });
+}
+function hasCreds() {
+  return !!(localStorage.getItem('b_email') && localStorage.getItem('b_pass'));
+}
 
-// ─── View transitions ─────────────────────────────────────────────────────────
+/* ── view switching ──────────────────────────────────────────────────────── */
 
 function showDashboard() {
-  document.getElementById('loginView').classList.add('view-hidden');
-  const dash = document.getElementById('dashboardView');
-  dash.classList.remove('view-hidden');
-  dash.style.position = '';
+  document.getElementById('loginView').style.display    = 'none';
+  var d = document.getElementById('dashboardView');
+  d.style.display  = 'block';
+  d.style.position = '';
+  d.style.opacity  = '1';
 }
-
 function showLogin() {
   stopPolling();
-  document.getElementById('dashboardView').classList.add('view-hidden');
-  document.getElementById('dashboardView').style.position = 'absolute';
-  document.getElementById('loginView').classList.remove('view-hidden');
+  document.getElementById('dashboardView').style.display = 'none';
+  document.getElementById('loginView').style.display     = 'flex';
 }
 
-// ─── Network ──────────────────────────────────────────────────────────────────
+/* ── network ─────────────────────────────────────────────────────────────── */
 
-async function fetchJson(url) {
-  const { email, password, stationId } = getCreds();
-  const res = await fetch(url, {
-    cache: 'no-store',
-    headers: {
-      'X-Sems-Email':      email,
-      'X-Sems-Password':   password,
-      'X-Sems-Station-Id': stationId,
-    },
-  });
-  const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-  if (!res.ok) {
-    const err = new Error(body.error || `HTTP ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return body;
-}
-
-// ─── Login form ───────────────────────────────────────────────────────────────
-
-function initLoginForm() {
-  const form     = document.getElementById('loginForm');
-  const errorBox = document.getElementById('loginError');
-  const btn      = document.getElementById('loginBtn');
-  const btnText  = document.getElementById('loginBtnText');
-  const spinner  = document.getElementById('loginSpinner');
-
-  // Pre-fill if credentials already stored (e.g. returning after a sign-out)
-  const { email, stationId } = getCreds();
-  if (email) document.getElementById('lEmail').value = email;
-  document.getElementById('lStationId').value = stationId;
-
-  // Toggle password visibility
-  document.getElementById('togglePwd').addEventListener('click', () => {
-    const inp  = document.getElementById('lPassword');
-    const icon = document.getElementById('eyeIcon');
-    const show = inp.type === 'password';
-    inp.type = show ? 'text' : 'password';
-    icon.innerHTML = show
-      ? `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8
-                  a18.45 18.45 0 0 1 5.06-5.94"/>
-         <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8
-                  a18.5 18.5 0 0 1-2.16 3.19"/>
-         <line x1="1" y1="1" x2="23" y2="23"/>`
-      : `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-         <circle cx="12" cy="12" r="3"/>`;
-  });
-
-  // Advanced section toggle
-  const advToggle  = document.getElementById('advancedToggle');
-  const advSection = document.getElementById('advancedSection');
-  const advChevron = document.getElementById('advChevron');
-  advToggle.addEventListener('click', () => {
-    const open = !advSection.classList.contains('hidden');
-    advSection.classList.toggle('hidden', open);
-    advChevron.style.transform = open ? '' : 'rotate(90deg)';
-  });
-
-  // Submit
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorBox.classList.add('hidden');
-    btn.disabled = true;
-    btnText.textContent = 'Signing in…';
-    spinner.classList.remove('hidden');
-
-    const email     = document.getElementById('lEmail').value.trim();
-    const password  = document.getElementById('lPassword').value;
-    const stationId = document.getElementById('lStationId').value.trim() || DEFAULT_STATION;
-
+function apiFetch(url, callback) {
+  var c = getCreds();
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', url, true);
+  xhr.setRequestHeader('X-Sems-Email',      c.email);
+  xhr.setRequestHeader('X-Sems-Password',   c.password);
+  xhr.setRequestHeader('X-Sems-Station-Id', c.stationId);
+  xhr.onload = function() {
     try {
-      saveCreds({ email, password, stationId });
-      // Authenticate + load data — if this throws with 401 the creds are wrong
-      const monitor = await fetchJson('/api/monitor');
+      var body = JSON.parse(xhr.responseText);
+      if (xhr.status === 401) {
+        callback(new Error(body.error || 'Unauthorised'), null, 401);
+      } else if (xhr.status >= 300) {
+        callback(new Error(body.error || 'HTTP ' + xhr.status), null, xhr.status);
+      } else {
+        callback(null, body);
+      }
+    } catch(e) {
+      callback(new Error('Bad response'), null);
+    }
+  };
+  xhr.onerror = function() { callback(new Error('Network error'), null); };
+  xhr.send();
+}
+
+/* ── login form ──────────────────────────────────────────────────────────── */
+
+function initLogin() {
+  var form    = document.getElementById('loginForm');
+  var errBox  = document.getElementById('loginError');
+  var btn     = document.getElementById('loginBtn');
+  var btnTxt  = document.getElementById('loginBtnText');
+  var spinner = document.getElementById('loginSpinner');
+
+  /* pre-fill */
+  var c = getCreds();
+  if (c.email) document.getElementById('lEmail').value     = c.email;
+  document.getElementById('lStationId').value = c.stationId;
+
+  /* password visibility toggle */
+  document.getElementById('togglePwd').addEventListener('click', function() {
+    var inp  = document.getElementById('lPassword');
+    var icon = document.getElementById('eyeIcon');
+    if (inp.type === 'password') {
+      inp.type = 'text';
+      icon.innerHTML =
+        '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8' +
+        'a18.45 18.45 0 0 1 5.06-5.94"/>' +
+        '<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8' +
+        'a18.5 18.5 0 0 1-2.16 3.19"/>' +
+        '<line x1="1" y1="1" x2="23" y2="23"/>';
+    } else {
+      inp.type = 'password';
+      icon.innerHTML =
+        '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>' +
+        '<circle cx="12" cy="12" r="3"/>';
+    }
+  });
+
+  /* advanced toggle */
+  document.getElementById('advancedToggle').addEventListener('click', function() {
+    var sec     = document.getElementById('advancedSection');
+    var chevron = document.getElementById('advChevron');
+    var open    = sec.style.display === 'block';
+    sec.style.display    = open ? 'none' : 'block';
+    chevron.style.transform = open ? '' : 'rotate(90deg)';
+  });
+
+  /* form submit */
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();   /* ← must be first, before any async */
+    e.stopPropagation();
+
+    var email     = document.getElementById('lEmail').value.trim();
+    var password  = document.getElementById('lPassword').value;
+    var stationId = document.getElementById('lStationId').value.trim() || DEFAULT_SID;
+
+    if (!email || !password) {
+      showErr('Please enter your email and password.');
+      return;
+    }
+
+    errBox.style.display = 'none';
+    btn.disabled         = true;
+    btnTxt.textContent   = 'Signing in…';
+    spinner.style.display = 'inline-block';
+
+    saveCreds(email, password, stationId);
+
+    apiFetch('/api/monitor', function(err, data, status) {
+      if (err) {
+        clearCreds();
+        showErr(
+          (status === 401)
+            ? 'Incorrect email or password. Please try again.'
+            : 'Error: ' + err.message
+        );
+        btn.disabled          = false;
+        btnTxt.textContent    = 'Sign in';
+        spinner.style.display = 'none';
+        return;
+      }
       showDashboard();
-      renderAll(monitor, null);
-      fetchJson('/api/pac').then(pac => renderPowerCurve(pac)).catch(() => {});
+      renderAll(data, null);
+      apiFetch('/api/pac', function(e2, pac) {
+        if (!e2 && pac) renderPowerCurve(pac);
+      });
       startPolling();
-    } catch (err) {
-      clearCreds();
-      errorBox.textContent =
-        err.status === 401
-          ? 'Incorrect email or password. Please try again.'
-          : `Error: ${err.message}`;
-      errorBox.classList.remove('hidden');
-      btn.disabled = false;
-      btnText.textContent = 'Sign in';
-      spinner.classList.add('hidden');
+    });
+
+    function showErr(msg) {
+      errBox.textContent   = msg;
+      errBox.style.display = 'block';
     }
   });
 }
 
-// ─── Sign out ─────────────────────────────────────────────────────────────────
+/* ── sign-out ─────────────────────────────────────────────────────────────── */
 
 function initSignOut() {
-  document.getElementById('signOutBtn').addEventListener('click', () => {
+  document.getElementById('signOutBtn').addEventListener('click', function() {
     clearCreds();
-    // Reset last-values so next login animates from 0
-    Object.keys(lastValues).forEach(k => lastValues[k] = 0);
-    // Clear chart
+    LAST = { liveW:0, today:0, month:0, total:0, cap:0 };
     if (pacChart) {
       pacChart.data.labels = [];
       pacChart.data.datasets[0].data = [];
@@ -152,274 +176,268 @@ function initSignOut() {
   });
 }
 
-// ─── Render helpers ───────────────────────────────────────────────────────────
+/* ── utilities ───────────────────────────────────────────────────────────── */
 
-const $ = id => document.getElementById(id);
-
-const lastValues = { liveW:0, today:0, month:0, total:0, capacity:0 };
-
-function isSameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() &&
-         a.getMonth()    === b.getMonth()    &&
-         a.getDate()     === b.getDate();
+function fmt(n, d) {
+  if (!isFinite(n)) return '—';
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: d, maximumFractionDigits: d
+  });
 }
-
-function parseGoodweTime(s) {
-  if (!s || typeof s !== 'string') return null;
-  const [datePart, timePart = '00:00:00'] = s.trim().split(' ');
-  const [hh=0, mm=0, ss=0] = timePart.split(':').map(Number);
+function fmtTime(d) {
+  return d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
+}
+function parseGwTime(s) {
+  if (!s) return null;
+  var pts = s.trim().split(' ');
+  var dp  = pts[0], tp = pts[1] || '00:00:00';
+  var t   = tp.split(':');
+  var hh=+t[0]||0, mm=+t[1]||0, ss=+t[2]||0;
   try {
-    if (datePart.includes('-')) {
-      const [y,m,d] = datePart.split('-').map(Number);
-      return new Date(y, m-1, d, hh, mm, ss);
+    if (dp.indexOf('-') > -1) {
+      var d = dp.split('-'); return new Date(+d[0],+d[1]-1,+d[2],hh,mm,ss);
     }
-    if (datePart.includes('/')) {
-      const [m,d,y] = datePart.split('/').map(Number);
-      return new Date(y, m-1, d, hh, mm, ss);
+    if (dp.indexOf('/') > -1) {
+      var d = dp.split('/'); return new Date(+d[2],+d[0]-1,+d[1],hh,mm,ss);
     }
-  } catch(_) {}
+  } catch(e){}
   return null;
 }
-
-function isSolarStale(monitor) {
-  const s = monitor?.inverter?.[0]?.d?.last_refresh_time ?? '';
-  const t = parseGoodweTime(s);
+function sameDay(a,b) {
+  return a.getFullYear()===b.getFullYear() &&
+         a.getMonth()===b.getMonth() &&
+         a.getDate()===b.getDate();
+}
+function isStale(monitor) {
+  var s = (monitor.inverter||[])[0];
+  var t = parseGwTime(s && s.d && s.d.last_refresh_time);
   if (!t) return false;
-  const n = new Date();
-  return new Date(t.getFullYear(), t.getMonth(), t.getDate())
-       < new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  var n = new Date();
+  return new Date(t.getFullYear(),t.getMonth(),t.getDate()) <
+         new Date(n.getFullYear(),n.getMonth(),n.getDate());
+}
+function animate(from, to, ms, fn) {
+  var start = performance.now();
+  function tick(now) {
+    var t = Math.min(1,(now-start)/ms);
+    var e = 1-Math.pow(1-t,3);
+    fn(from+(to-from)*e);
+    if (t<1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 }
 
-function animateNumber(from, to, ms, onFrame) {
-  const start = performance.now();
-  const ease  = t => 1 - Math.pow(1-t, 3);
-  (function tick(now) {
-    const t = Math.min(1, (now-start)/ms);
-    onFrame(from + (to-from)*ease(t));
-    if (t < 1) requestAnimationFrame(tick);
-  })(performance.now());
-}
-
-function fmt(n, decimals=1) {
-  if (!Number.isFinite(n)) return '—';
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-const fmtTime = d =>
-  d.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
-
-// ─── Renderers ────────────────────────────────────────────────────────────────
+/* ── renderers ───────────────────────────────────────────────────────────── */
 
 function renderHeader(monitor) {
-  const info = monitor.info || {};
-  $('stationName').textContent    = info.stationname || 'Solar Dashboard';
-  $('stationAddress').textContent = info.address     || '';
+  var info = monitor.info || {};
+  document.getElementById('stationName').textContent    = info.stationname || 'Solar';
+  document.getElementById('stationAddress').textContent = info.address     || '';
 
-  const s = info.status;
-  const [color, label] =
-    s === 1 || s === 0 ? ['#10B981','Online']
-    : s === -1         ? ['#8B9CB5','Wait Mode']
-    :                    ['#EF4444','Fault'];
-  const badge = $('statusBadge');
+  var s = info.status;
+  var color = s===1||s===0 ? '#10B981' : s===-1 ? '#8B9CB5' : '#EF4444';
+  var label = s===1||s===0 ? 'Online'  : s===-1 ? 'Wait Mode' : 'Fault';
+  var badge = document.getElementById('statusBadge');
   badge.innerHTML =
-    `<span class="pulse-dot w-1.5 h-1.5 rounded-full" style="background:${color}"></span>` +
-    `<span style="color:${color}">${label}</span>`;
-  badge.style.cssText += `;border-color:${color}55;background:${color}1a`;
-  $('lastRefreshed').textContent = `Refreshed ${fmtTime(new Date())}`;
+    '<span class="pulse-dot" style="display:inline-block;width:6px;height:6px;' +
+    'border-radius:50%;background:'+color+'"></span>' +
+    '<span style="color:'+color+'"> '+label+'</span>';
+  badge.style.borderColor = color+'55';
+  badge.style.background  = color+'1a';
+  document.getElementById('lastRefreshed').textContent = 'Refreshed '+fmtTime(new Date());
 }
 
-function renderLiveOutput(monitor) {
-  const pac   = Number(monitor?.kpi?.pac  ?? 0);
-  const capKw = Number(monitor?.info?.capacity ?? 0);
-  animateNumber(lastValues.liveW, pac, 700, v => {
-    $('liveWatts').textContent = `${Math.round(v).toLocaleString()} W`;
-    $('liveWatts').style.color = pac > 0 ? '#F59E0B' : '#8B9CB5';
-  });
-  lastValues.liveW = pac;
-  $('liveCaption').textContent = pac > 0
-    ? 'Currently generating'
-    : (monitor?.inverter?.[0]?.d?.work_mode || 'Waiting for sunrise');
+function renderLive(monitor) {
+  var pac   = +(monitor.kpi && monitor.kpi.pac) || 0;
+  var capKw = +(monitor.info && monitor.info.capacity) || 0;
 
-  const pct = capKw > 0 ? Math.min(100, (pac/(capKw*1000))*100) : 0;
-  animateNumber(lastValues.capacity, pct, 900, v => {
-    $('capacityBar').style.width = `${v.toFixed(1)}%`;
-    $('capacityPct').textContent = `${Math.round(v)}%`;
+  animate(LAST.liveW, pac, 700, function(v) {
+    document.getElementById('liveWatts').textContent = Math.round(v).toLocaleString()+' W';
+    document.getElementById('liveWatts').style.color = pac>0 ? '#F59E0B' : '#8B9CB5';
   });
-  lastValues.capacity = pct;
+  LAST.liveW = pac;
+  document.getElementById('liveCaption').textContent =
+    pac > 0 ? 'Currently generating'
+    : (((monitor.inverter||[])[0]||{}).d||{}).work_mode || 'Waiting for sunrise';
+
+  var pct = capKw>0 ? Math.min(100,(pac/(capKw*1000))*100) : 0;
+  animate(LAST.cap, pct, 900, function(v) {
+    document.getElementById('capacityBar').style.width = v.toFixed(1)+'%';
+    document.getElementById('capacityPct').textContent = Math.round(v)+'%';
+  });
+  LAST.cap = pct;
 }
 
 function renderKpis(monitor, stale) {
-  const kpi  = monitor.kpi || {};
-  const today = stale ? 0 : Number(kpi.power || 0);
-  const month = Number(kpi.month_generation || 0);
-  const totalKwh = Number(kpi.total_power   || 0);
+  var kpi   = monitor.kpi || {};
+  var today = stale ? 0 : (+(kpi.power)||0);
+  var month = +(kpi.month_generation)||0;
+  var total = +(kpi.total_power)||0;
 
-  animateNumber(lastValues.today, today, 700, v =>
-    $('kpiToday').textContent = fmt(v, today >= 100 ? 0 : 1));
-  lastValues.today = today;
+  animate(LAST.today, today, 700, function(v){
+    document.getElementById('kpiToday').textContent = fmt(v, today>=100?0:1);
+  });
+  LAST.today = today;
 
-  animateNumber(lastValues.month, month, 700, v =>
-    $('kpiMonth').textContent = fmt(v, month >= 1000 ? 0 : 1));
-  lastValues.month = month;
+  animate(LAST.month, month, 700, function(v){
+    document.getElementById('kpiMonth').textContent = fmt(v, month>=1000?0:1);
+  });
+  LAST.month = month;
 
-  const showMwh = totalKwh >= 1000;
-  const tv = showMwh ? totalKwh/1000 : totalKwh;
-  animateNumber(lastValues.total, tv, 700, v =>
-    $('kpiTotal').textContent = fmt(v, tv >= 100 ? 0 : 1));
-  lastValues.total = tv;
-  $('kpiTotalUnit').textContent = showMwh ? 'MWh' : 'kWh';
+  var mwh = total>=1000, tv = mwh ? total/1000 : total;
+  animate(LAST.total, tv, 700, function(v){
+    document.getElementById('kpiTotal').textContent = fmt(v, tv>=100?0:1);
+  });
+  LAST.total = tv;
+  document.getElementById('kpiTotalUnit').textContent = mwh ? 'MWh' : 'kWh';
 }
 
-function renderEnvironmental(monitor) {
-  const e = monitor.hjgx || {};
-  $('co2').textContent   = fmt(Number(e.co2  || 0), 2);
-  $('trees').textContent = fmt(Number(e.tree || 0), 0);
-  $('coal').textContent  = fmt(Number(e.coal || 0), 0);
+function renderEnv(monitor) {
+  var e = monitor.hjgx || {};
+  document.getElementById('co2').textContent   = fmt(+(e.co2 )||0, 2);
+  document.getElementById('trees').textContent = fmt(+(e.tree)||0, 0);
+  document.getElementById('coal').textContent  = fmt(+(e.coal)||0, 0);
 }
 
-// ─── Power curve ──────────────────────────────────────────────────────────────
-
-let pacChart = null;
+/* ── chart ───────────────────────────────────────────────────────────────── */
 
 function buildChart() {
-  pacChart = new Chart($('pacChart'), {
+  pacChart = new Chart(document.getElementById('pacChart'), {
     type: 'line',
     data: { labels:[], datasets:[{
-      data: [],
-      borderColor: '#F59E0B',
-      backgroundColor: c => {
-        const {ctx, chartArea} = c.chart;
-        if (!chartArea) return 'rgba(245,158,11,0.18)';
-        const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        g.addColorStop(0, 'rgba(245,158,11,0.35)');
-        g.addColorStop(1, 'rgba(245,158,11,0.00)');
+      data:[], borderColor:'#F59E0B',
+      backgroundColor: function(c) {
+        var ca = c.chart.chartArea;
+        if (!ca) return 'rgba(245,158,11,.18)';
+        var g = c.chart.ctx.createLinearGradient(0,ca.top,0,ca.bottom);
+        g.addColorStop(0,'rgba(245,158,11,.35)');
+        g.addColorStop(1,'rgba(245,158,11,.00)');
         return g;
       },
       borderWidth:2, fill:true, tension:0.35,
       pointRadius:0, pointHoverRadius:4,
       pointHoverBackgroundColor:'#F59E0B',
     }]},
-    options: {
+    options:{
       responsive:true, maintainAspectRatio:false,
       interaction:{ mode:'index', intersect:false },
       plugins:{
         legend:{ display:false },
         tooltip:{
           backgroundColor:'#1A2235', borderColor:'#1E2D45', borderWidth:1,
-          titleColor:'#FFFFFF', bodyColor:'#F59E0B', padding:10, displayColors:false,
+          titleColor:'#FFF', bodyColor:'#F59E0B', padding:10, displayColors:false,
           callbacks:{
-            title: items => items[0]?.label || '',
-            label: item  => `${Math.round(item.parsed.y).toLocaleString()} W`,
+            title:function(i){ return i[0]&&i[0].label||''; },
+            label:function(i){ return Math.round(i.parsed.y).toLocaleString()+' W'; },
           },
         },
       },
       scales:{
-        x:{ grid:{display:false}, ticks:{color:'#8B9CB5',font:{size:10},maxRotation:0,autoSkipPadding:16} },
-        y:{ beginAtZero:true, grid:{color:'rgba(30,45,69,0.6)'},
+        x:{ grid:{display:false},
+            ticks:{color:'#8B9CB5',font:{size:10},maxRotation:0,autoSkipPadding:16} },
+        y:{ beginAtZero:true, grid:{color:'rgba(30,45,69,.6)'},
             ticks:{color:'#8B9CB5',font:{size:10},
-                   callback: v => v>=1000 ? `${(v/1000).toFixed(1)}k` : v} },
+              callback:function(v){ return v>=1000?(v/1000).toFixed(1)+'k':v; }} },
       },
     },
   });
 }
 
-function calcKwh(pts) {
-  let wh = 0;
-  for (let i=0; i<pts.length-1; i++) {
-    wh += pts[i].pac * (pts[i+1].t - pts[i].t) / 3_600_000;
-  }
-  return wh / 1000;
-}
-
-function renderPowerCurve({ date, samples }) {
+function renderPowerCurve(pac) {
   if (!pacChart) buildChart();
-  const pts = (samples||[])
-    .map(s => ({ t:parseGoodweTime(s.date), pac:Number(s.pac||0) }))
-    .filter(p => p.t);
+  var samples = pac.samples || [];
+  var pts = samples.map(function(s){
+    return { t:parseGwTime(s.date), pac:+(s.pac)||0 };
+  }).filter(function(p){ return !!p.t; });
 
-  pacChart.data.labels = pts.map(p => fmtTime(p.t));
-  pacChart.data.datasets[0].data = pts.map(p => p.pac);
+  pacChart.data.labels = pts.map(function(p){ return fmtTime(p.t); });
+  pacChart.data.datasets[0].data = pts.map(function(p){ return p.pac; });
   pacChart.update('none');
 
-  const now = new Date();
-  const d   = parseGoodweTime((date||'') + ' 00:00:00');
-  $('pacSubtitle').textContent = (d && isSameDay(d, now)) ? 'Today' : date || '';
+  var now = new Date();
+  var d   = parseGwTime((pac.date||'')+' 00:00:00');
+  document.getElementById('pacSubtitle').textContent =
+    (d && sameDay(d,now)) ? 'Today' : pac.date||'';
+
+  var peakEl  = document.getElementById('peakBadge');
+  var totalEl = document.getElementById('totalBadge');
 
   if (!pts.length) {
-    $('peakBadge').classList.add('hidden');
-    $('totalBadge').classList.add('hidden');
+    peakEl.style.display = totalEl.style.display = 'none';
     return;
   }
-  const peak  = pts.reduce((m,p) => p.pac>m ? p.pac : m, 0);
-  const total = calcKwh(pts.map(p => ({t:p.t.getTime(), pac:p.pac})));
-  $('peakBadge').textContent = `Peak ${Math.round(peak).toLocaleString()} W`;
-  $('peakBadge').classList.remove('hidden');
-  if (total > 0) {
-    $('totalBadge').textContent = `Total ${total.toFixed(2)} kWh`;
-    $('totalBadge').classList.remove('hidden');
+  var peak = pts.reduce(function(m,p){ return p.pac>m?p.pac:m; }, 0);
+  peakEl.textContent = 'Peak '+Math.round(peak).toLocaleString()+' W';
+  peakEl.style.display = 'inline-flex';
+
+  var wh = 0;
+  for (var i=0;i<pts.length-1;i++) {
+    wh += pts[i].pac * (pts[i+1].t.getTime()-pts[i].t.getTime()) / 3600000;
+  }
+  var kwh = wh/1000;
+  if (kwh > 0) {
+    totalEl.textContent = 'Total '+kwh.toFixed(2)+' kWh';
+    totalEl.style.display = 'inline-flex';
   } else {
-    $('totalBadge').classList.add('hidden');
+    totalEl.style.display = 'none';
   }
 }
 
 function renderAll(monitor, pac) {
-  const stale = isSolarStale(monitor);
+  var stale = isStale(monitor);
+  var m     = stale ? Object.assign({},monitor,{kpi:Object.assign({},monitor.kpi,{pac:0})}) : monitor;
   renderHeader(monitor);
-  renderLiveOutput(stale ? {...monitor, kpi:{...monitor.kpi, pac:0}} : monitor);
+  renderLive(m);
   renderKpis(monitor, stale);
-  renderEnvironmental(monitor);
+  renderEnv(monitor);
   if (pac) renderPowerCurve(pac);
 }
 
-// ─── Polling ──────────────────────────────────────────────────────────────────
+/* ── polling ─────────────────────────────────────────────────────────────── */
 
-let pollTimer = null;
-
-async function refresh() {
-  $('errorBox').classList.add('hidden');
-  try {
-    const [monitor, pac] = await Promise.all([
-      fetchJson('/api/monitor'),
-      fetchJson('/api/pac'),
-    ]);
-    renderAll(monitor, pac);
-  } catch(err) {
-    if (err.status === 401) {
-      clearCreds();
-      showLogin();
-    } else {
-      $('errorBox').textContent = `⚠ ${err.message}`;
-      $('errorBox').classList.remove('hidden');
+function refresh() {
+  document.getElementById('errorBox').style.display = 'none';
+  apiFetch('/api/monitor', function(err, monitor, status) {
+    if (err) {
+      if (status===401) { clearCreds(); showLogin(); }
+      else {
+        document.getElementById('errorBox').textContent = '⚠ '+err.message;
+        document.getElementById('errorBox').style.display = 'block';
+      }
+      return;
     }
-  }
+    renderAll(monitor, null);
+    apiFetch('/api/pac', function(e2, pac) {
+      if (!e2 && pac) renderPowerCurve(pac);
+    });
+  });
 }
 
 function startPolling() {
   stopPolling();
-  pollTimer = setInterval(refresh, POLL_INTERVAL_MS);
+  pollTimer = setInterval(refresh, POLL_MS);
 }
 function stopPolling() {
   clearInterval(pollTimer);
   pollTimer = null;
 }
 
-document.addEventListener('visibilitychange', () => {
+document.addEventListener('visibilitychange', function() {
   if (document.hidden) stopPolling();
   else if (hasCreds()) { refresh(); startPolling(); }
 });
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+/* ── boot ────────────────────────────────────────────────────────────────── */
 
-initLoginForm();
-initSignOut();
+document.addEventListener('DOMContentLoaded', function() {
+  initLogin();
+  initSignOut();
 
-if (hasCreds()) {
-  // Returning user — jump straight to dashboard, load data
-  showDashboard();
-  refresh().then(startPolling);
-} else {
-  // First visit or signed out — show login
-  showLogin();
-}
+  if (hasCreds()) {
+    showDashboard();
+    refresh();
+    startPolling();
+  } else {
+    showLogin();
+  }
+});
