@@ -1,4 +1,4 @@
-import { semsCall, todayDateString } from '../lib/sems.mjs';
+import { semsCall, resolveCredentials, todayDateString } from '../lib/sems.mjs';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
@@ -8,8 +8,9 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   try {
+    const { stationId } = resolveCredentials(req);
     const date = (req.query.date || todayDateString()).toString();
-    const { data, stationId } = await semsCall(
+    const { data } = await semsCall(
       req,
       'v2/PowerStationMonitor/GetPowerStationPacByDayForApp',
       { id: stationId, date },
