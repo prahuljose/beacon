@@ -276,7 +276,13 @@
         </div>
         <div class="mt-4">
           <div class="flex justify-between text-[11px] mb-1.5">
-            <span class="text-textSec">Capacity used</span>
+            <button class="info-btn flex items-center gap-1 text-textSec hover:text-textPrim transition-colors"
+                    data-info="capacity">
+              <span>Capacity used</span>
+              <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 opacity-50" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </button>
             <span id="capacityPct" class="text-accent font-semibold">—</span>
           </div>
           <div class="h-1.5 bg-divider rounded-full overflow-hidden">
@@ -322,7 +328,14 @@
         </div>
         <!-- Lifetime impact -->
         <div class="rounded-2xl p-5 bg-card border border-divider flex-1">
-          <h2 class="text-sm font-semibold mb-1">Lifetime Impact</h2>
+          <div class="flex items-center justify-between mb-1">
+            <h2 class="text-sm font-semibold">Lifetime Impact</h2>
+            <button class="info-btn text-textSec hover:text-accent transition-colors" data-info="lifetime">
+              <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 opacity-60" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </button>
+          </div>
           <p class="text-[11px] text-textSec mb-4">What your panels have offset</p>
           <div class="grid grid-cols-3 gap-3 text-center">
             <div><div id="co2" class="num text-lg font-bold text-green">—</div><div class="text-[10px] text-textSec mt-0.5">tonnes CO₂</div></div>
@@ -334,35 +347,84 @@
 
       <!-- ── 3. Earnings ─────────────────────────────────────────────── -->
       <section class="rounded-2xl p-5 bg-card border border-divider">
-        <div class="flex items-center gap-2 mb-4">
-          <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:rgba(16,185,129,0.15);">
-            <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 text-green" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-            </svg>
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:rgba(16,185,129,0.15);">
+              <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 text-green" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+              </svg>
+            </div>
+            <h2 class="text-sm font-semibold">Earnings</h2>
           </div>
-          <h2 class="text-sm font-semibold">Earnings</h2>
+          <!-- Edit rate button -->
+          <button id="editRateBtn" title="Set electricity rate"
+                  class="w-6 h-6 rounded-full flex items-center justify-center text-textSec hover:text-accent hover:bg-cardAlt transition-colors">
+            <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
         </div>
+
+        <!-- Rate editor (hidden by default) -->
+        <div id="rateEditor" style="display:none" class="mb-4 p-3 rounded-xl" style="background:#1A2235;">
+          <p class="text-[11px] text-textSec mb-2">Set your electricity sell/feed-in rate to calculate earnings from generation.</p>
+          <div class="flex gap-2">
+            <input id="rateInput" type="number" min="0" step="0.01" placeholder="e.g. 4.50"
+                   class="flex-1 px-3 py-2 rounded-lg text-sm bg-cardAlt border border-divider text-textPrim outline-none focus:border-accent transition-colors"
+                   style="background:#141927">
+            <select id="rateCurrency"
+                    class="px-3 py-2 rounded-lg text-sm bg-cardAlt border border-divider text-textPrim outline-none focus:border-accent transition-colors"
+                    style="background:#141927">
+              <option value="INR">₹/kWh</option>
+              <option value="USD">$/kWh</option>
+              <option value="EUR">€/kWh</option>
+            </select>
+          </div>
+          <button id="saveRateBtn" class="w-full mt-2 py-2 rounded-xl text-xs font-semibold text-black bg-accent hover:bg-accentDk transition-colors">Save rate</button>
+        </div>
+
+        <!-- Rate info chip -->
+        <div id="rateChip" style="display:none" class="mb-3 px-2.5 py-1 rounded-full text-[10px] inline-flex items-center gap-1.5"
+             style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.25);color:#10B981">
+          <svg viewBox="0 0 24 24" class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span id="rateChipText">Rate set</span>
+        </div>
+
         <div class="space-y-3">
           <div class="flex justify-between items-center py-2.5 border-b border-divider">
             <span class="text-xs text-textSec">Today's income</span>
             <span id="earnToday" class="num text-sm font-bold text-green">—</span>
           </div>
-          <div class="flex justify-between items-center py-2.5">
+          <div class="flex justify-between items-center py-2.5 border-b border-divider">
             <span class="text-xs text-textSec">Total lifetime income</span>
             <span id="earnTotal" class="num text-sm font-bold text-textPrim">—</span>
+          </div>
+          <div class="flex justify-between items-center py-2.5">
+            <span class="text-xs text-textSec">Monthly income</span>
+            <span id="earnMonth" class="num text-sm font-semibold text-textSec">—</span>
           </div>
         </div>
       </section>
 
       <!-- ── 4. Today's Impact ────────────────────────────────────────── -->
       <section class="rounded-2xl p-5 bg-card border border-divider">
-        <div class="flex items-center gap-2 mb-4">
-          <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:rgba(245,158,11,0.15);">
-            <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-            </svg>
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:rgba(245,158,11,0.15);">
+              <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 text-accent" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
+            </div>
+            <h2 class="text-sm font-semibold">Today's Impact</h2>
           </div>
-          <h2 class="text-sm font-semibold">Today's Impact</h2>
+          <button class="info-btn text-textSec hover:text-accent transition-colors" data-info="impact">
+            <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 opacity-60" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </button>
         </div>
         <p class="text-[11px] text-textSec mb-4">What today's <span id="impactKwh" class="text-accent font-semibold">— kWh</span> could power</p>
         <div class="grid grid-cols-2 gap-3">
@@ -461,6 +523,30 @@
         <span id="errorBox" style="display:none;color:#EF4444"></span>
       </footer>
     </main>
+  </div>
+</div>
+
+<!-- ── Info modal (reused by all ℹ buttons) ─────────────────────────────── -->
+<div id="infoModal" style="display:none"
+     class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+     style="background:rgba(10,14,26,0.8);backdrop-filter:blur(4px)">
+  <div class="w-full max-w-sm rounded-3xl border border-divider p-6" style="background:#141927">
+    <div class="flex items-start justify-between mb-4">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-xl flex items-center justify-center" style="background:rgba(245,158,11,0.15);">
+          <svg viewBox="0 0 24 24" class="w-4 h-4 text-accent" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <h3 id="infoTitle" class="text-sm font-semibold">Info</h3>
+      </div>
+      <button id="closeInfoBtn" class="w-7 h-7 flex items-center justify-center rounded-full text-textSec hover:text-textPrim hover:bg-cardAlt transition-colors">
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div id="infoBody" class="text-xs text-textSec leading-relaxed space-y-3"></div>
   </div>
 </div>
 
@@ -684,39 +770,184 @@ function renderEnv(m) {
   document.getElementById('coal').textContent=fmt(+(e.coal)||0,0);
 }
 function buildChart() {
+  // Gradient must be created fresh on every repaint — use a plugin so it
+  // is called at draw time rather than at chart-build time (when chartArea is null).
+  var gradientPlugin = {
+    id:'pacGradient',
+    beforeDatasetsDraw: function(chart) {
+      var ds = chart.data.datasets[0];
+      var ca = chart.chartArea;
+      if (!ca) return;
+      var g = chart.ctx.createLinearGradient(0, ca.top, 0, ca.bottom);
+      g.addColorStop(0, 'rgba(245,158,11,.35)');
+      g.addColorStop(1, 'rgba(245,158,11,0)');
+      ds.backgroundColor = g;
+    }
+  };
   pacChart=new Chart(document.getElementById('pacChart'),{
     type:'line', data:{labels:[],datasets:[{data:[],borderColor:'#F59E0B',
-      backgroundColor:function(c){var ca=c.chart.chartArea; if(!ca) return 'rgba(245,158,11,.18)'; var g=c.chart.ctx.createLinearGradient(0,ca.top,0,ca.bottom); g.addColorStop(0,'rgba(245,158,11,.35)'); g.addColorStop(1,'rgba(245,158,11,0)'); return g;},
-      borderWidth:2,fill:true,tension:0.35,pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:'#F59E0B'
+      backgroundColor:'rgba(245,158,11,.18)',
+      borderWidth:2,fill:true,tension:0.35,pointRadius:0,pointHoverRadius:4,
+      pointHoverBackgroundColor:'#F59E0B'
     }]},
-    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    options:{responsive:true,maintainAspectRatio:false,
+      animation:{duration:400},
+      interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},tooltip:{backgroundColor:'#1A2235',borderColor:'#1E2D45',borderWidth:1,titleColor:'#fff',bodyColor:'#F59E0B',padding:10,displayColors:false,
         callbacks:{title:function(i){return i[0]&&i[0].label||'';},label:function(i){return Math.round(i.parsed.y).toLocaleString()+' W';}}}},
       scales:{x:{grid:{display:false},ticks:{color:'#8B9CB5',font:{size:10},maxRotation:0,autoSkipPadding:16}},
-              y:{beginAtZero:true,grid:{color:'rgba(30,45,69,.6)'},ticks:{color:'#8B9CB5',font:{size:10},callback:function(v){return v>=1000?(v/1000).toFixed(1)+'k':v;}}}}}
+              y:{beginAtZero:true,grid:{color:'rgba(30,45,69,.6)'},ticks:{color:'#8B9CB5',font:{size:10},callback:function(v){return v>=1000?(v/1000).toFixed(1)+'k':v;}}}}},
+    plugins:[gradientPlugin]
   });
 }
 function renderPowerCurve(pac) {
   if (!pacChart) buildChart();
   var pts=(pac.samples||[]).map(function(s){return{t:parseGwTime(s.date),pac:+(s.pac)||0};}).filter(function(p){return!!p.t;});
-  pacChart.data.labels=pts.map(function(p){return fmtTime(p.t);}); pacChart.data.datasets[0].data=pts.map(function(p){return p.pac;}); pacChart.update('none');
+  pacChart.data.labels=pts.map(function(p){return fmtTime(p.t);});
+  pacChart.data.datasets[0].data=pts.map(function(p){return p.pac;});
+  pacChart.update(); // full repaint so the gradient plugin fires
   var now=new Date(), d=parseGwTime((pac.date||'')+' 00:00:00');
   document.getElementById('pacSubtitle').textContent=(d&&sameDay(d,now))?'Today':pac.date||'';
   var peakEl=document.getElementById('peakBadge'), totalEl=document.getElementById('totalBadge');
   if (!pts.length){peakEl.style.display=totalEl.style.display='none';return;}
   var peak=pts.reduce(function(m,p){return p.pac>m?p.pac:m;},0);
-  peakEl.textContent='Peak '+Math.round(peak).toLocaleString()+' W'; peakEl.style.display='inline-flex';
+  if (peak>0) {
+    peakEl.textContent='Peak '+Math.round(peak).toLocaleString()+' W';
+    peakEl.style.display='inline-flex';
+  } else {
+    peakEl.style.display='none';
+  }
   var wh=0; for(var i=0;i<pts.length-1;i++) wh+=pts[i].pac*(pts[i+1].t.getTime()-pts[i].t.getTime())/3600000;
   var kwh=wh/1000;
-  if(kwh>0){totalEl.textContent='Total '+kwh.toFixed(2)+' kWh';totalEl.style.display='inline-flex';}else{totalEl.style.display='none';}
+  if(kwh>0.001){totalEl.textContent='Total '+kwh.toFixed(2)+' kWh';totalEl.style.display='inline-flex';}
+  else{totalEl.style.display='none';}
 }
 /* ── Earnings ─────────────────────────────────────────────────────────────── */
+var _lastMonitor = null; // kept so rate changes can re-render
+
+function getRate() {
+  var r = parseFloat(localStorage.getItem('b_rate')||'0');
+  return isFinite(r) && r > 0 ? r : 0;
+}
+function getRateCurrency() {
+  return localStorage.getItem('b_rate_cur') || 'INR';
+}
+function rateSym() {
+  var c = getRateCurrency();
+  return c==='INR'?'₹': c==='USD'?'$': c==='EUR'?'€': c+' ';
+}
+
 function renderEarnings(m) {
-  var kpi = m.kpi||{};
-  var cur  = kpi.currency || 'INR';
-  var sym  = cur==='INR'?'₹': cur==='USD'?'$': cur==='EUR'?'€': cur+' ';
-  document.getElementById('earnToday').textContent  = sym + fmt(+(kpi.day_income)||0, 2);
-  document.getElementById('earnTotal').textContent  = sym + fmt(+(kpi.total_income)||0, 2);
+  _lastMonitor = m;
+  var kpi   = m.kpi||{};
+  var rate  = getRate();
+  var sym   = rateSym();
+  var today = rate>0 ? (+(kpi.power)||0)*rate : (+(kpi.day_income)||0);
+  var total = rate>0 ? (+(kpi.total_power)||0)*rate : (+(kpi.total_income)||0);
+  var month = rate>0 ? (+(kpi.month_generation)||0)*rate : 0;
+
+  // Use SEMS currency symbol when not using custom rate
+  if (!rate) {
+    var c = kpi.currency||'INR';
+    sym = c==='INR'?'₹': c==='USD'?'$': c==='EUR'?'€': c+' ';
+  }
+
+  document.getElementById('earnToday').textContent  = sym + fmt(today, 2);
+  document.getElementById('earnTotal').textContent  = sym + fmt(total, 2);
+  document.getElementById('earnMonth').textContent  = month>0 ? sym + fmt(month, 2) : '—';
+
+  // Show rate chip
+  var chip = document.getElementById('rateChip');
+  var chipText = document.getElementById('rateChipText');
+  if (rate > 0) {
+    chipText.textContent = sym + rate.toFixed(2) + '/kWh (custom rate)';
+    chip.style.display = 'inline-flex';
+  } else {
+    chip.style.display = 'none';
+  }
+}
+
+function initRateEditor() {
+  var btn      = document.getElementById('editRateBtn');
+  var editor   = document.getElementById('rateEditor');
+  var saveBtn  = document.getElementById('saveRateBtn');
+  var rateInp  = document.getElementById('rateInput');
+  var curSel   = document.getElementById('rateCurrency');
+
+  // Pre-fill
+  var existing = getRate();
+  if (existing>0) rateInp.value = existing;
+  curSel.value = getRateCurrency();
+
+  btn.onclick = function() {
+    editor.style.display = editor.style.display==='none' ? 'block' : 'none';
+  };
+  saveBtn.onclick = function() {
+    var v = parseFloat(rateInp.value);
+    if (isNaN(v) || v<0) { rateInp.focus(); return; }
+    localStorage.setItem('b_rate', v>0 ? String(v) : '0');
+    localStorage.setItem('b_rate_cur', curSel.value);
+    editor.style.display = 'none';
+    if (_lastMonitor) renderEarnings(_lastMonitor);
+  };
+}
+
+/* ── Info modal ───────────────────────────────────────────────────────────── */
+var INFO = {
+  capacity: {
+    title: 'Capacity Used',
+    body: '<p>Shows how much of your solar system\'s total installed capacity is currently being used:</p>' +
+          '<p class="mt-2 px-3 py-2 rounded-lg text-[11px] font-mono" style="background:#1A2235">' +
+          'Current output (W) ÷ Installed capacity (W) × 100' +
+          '</p>' +
+          '<p class="mt-2">For example, if your system is rated at 5 kW and currently generating 3.5 kW, capacity used is <strong class="text-accent">70%</strong>.</p>' +
+          '<p class="mt-2">A system rarely hits 100% — real-world output is affected by panel temperature, dust, shading, and inverter efficiency.</p>'
+  },
+  lifetime: {
+    title: 'Lifetime Impact',
+    body: '<p>Estimated environmental equivalents based on your total generation:</p>' +
+          '<ul class="mt-2 space-y-2">' +
+          '<li>🌿 <strong class="text-green">CO₂ saved</strong> — based on the average grid emission factor (~0.82 kg CO₂ per kWh)</li>' +
+          '<li>🌳 <strong style="color:#34D399">Trees</strong> — each tree absorbs ~21 kg CO₂/year; equivalent number of trees shown</li>' +
+          '<li>⚫ <strong style="color:#A78BFA">Coal saved</strong> — roughly 0.35 kg of coal per kWh generated</li>' +
+          '</ul>' +
+          '<p class="mt-2 text-[11px] opacity-70">Values are estimates. Actual impact varies by grid mix and coal type.</p>'
+  },
+  impact: {
+    title: "Today's Energy Impact",
+    body: '<p>What today\'s solar generation could power, based on typical appliance consumption:</p>' +
+          '<ul class="mt-2 space-y-1.5">' +
+          '<li>📱 <strong>Smartphones</strong> — ~12 Wh per full charge</li>' +
+          '<li>💡 <strong>LED bulb</strong> — 10 W, so 1 kWh = 100 hours of light</li>' +
+          '<li>🌀 <strong>Ceiling fan</strong> — 75 W, so 1 kWh ≈ 13.3 hours</li>' +
+          '<li>❄️ <strong>AC unit</strong> — 1500 W (1.5 ton), so 1 kWh ≈ 40 minutes</li>' +
+          '</ul>' +
+          '<p class="mt-2 text-[11px] opacity-70">Based on today\'s actual generation. Resets each morning at sunrise.</p>'
+  }
+};
+
+function initInfoModal() {
+  var modal     = document.getElementById('infoModal');
+  var titleEl   = document.getElementById('infoTitle');
+  var bodyEl    = document.getElementById('infoBody');
+  var closeBtn  = document.getElementById('closeInfoBtn');
+
+  function open(key) {
+    var info = INFO[key]; if (!info) return;
+    titleEl.textContent = info.title;
+    bodyEl.innerHTML    = info.body;
+    modal.style.display = 'flex';
+  }
+  function close() { modal.style.display = 'none'; }
+
+  closeBtn.onclick = close;
+  modal.onclick = function(e) { if (e.target===modal) close(); };
+
+  // Wire all .info-btn elements (present + future via delegation)
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.info-btn');
+    if (btn) open(btn.dataset.info);
+  });
 }
 
 /* ── Today's Impact ───────────────────────────────────────────────────────── */
@@ -797,7 +1028,10 @@ function renderMonthly(data) {
     return parts.length>=3 ? parseInt(parts[parts.length-1],10)+'d' : s.label;
   });
   monthlyChart.data.datasets[0].data = samples.map(function(s){return s.kwh;});
-  monthlyChart.update('none');
+  // Re-assert colors explicitly — some Chart.js versions lose dataset styles on data-only update
+  monthlyChart.data.datasets[0].backgroundColor = samples.map(function(){return 'rgba(245,158,11,0.5)';});
+  monthlyChart.data.datasets[0].borderColor = samples.map(function(){return '#F59E0B';});
+  monthlyChart.update(); // full repaint, not 'none', so bar colors are applied
 
   var total = samples.reduce(function(a,s){return a+s.kwh;},0);
   var el = document.getElementById('monthlyTotal');
@@ -881,6 +1115,8 @@ document.addEventListener('visibilitychange',function(){
 document.addEventListener('DOMContentLoaded', function() {
   initLogin();
   initSignOut();
+  initRateEditor();
+  initInfoModal();
   if (hasCreds()) { showDashboard(); refresh(); startPolling(); }
   else            { showLogin(); }
 });
