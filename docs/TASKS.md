@@ -6,6 +6,10 @@ deploys to beacon.dpdns.org on push to `main`. Database: Supabase project
 `supabase/schema.sql`. Apply changes with the Supabase MCP `apply_migration`
 and keep the file in sync.
 
+Deploying: whenever app.js or styles.css changes, bump the `?v=` number on both
+links in index.html. Cloudflare tells browsers to cache those files for 4
+hours; index.html itself isn't cached.
+
 Testing: `python3 -m http.server 5173` in the repo, then open
 http://127.0.0.1:5173. It uses the LIVE database, and the user and friends
 have real data in it. Never edit existing characters while testing: create a
