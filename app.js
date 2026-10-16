@@ -48,9 +48,11 @@ const MOD = { 4: 2, 3: 1, 2: 0, 1: -1 };
 const STAT_SPREAD = '4,3,3,2,2,1';
 const PALETTE = ['#c9a24b', '#5fa8d3', '#d9776b', '#8fbf6a', '#b48ad6', '#e0a458', '#4fb3a9', '#d68fb0'];
 const DICE_TYPES = [4, 6, 8, 10, 12, 20, 100];
+const WEAPON_DIE = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+const PEN_WIDTHS = [2, 3, 5, 8, 13];
 
 const PANELS = {
-  identity: 'Identity', look: 'Appearance', money: 'Money', gear: 'Gear',
+  identity: 'Identity', look: 'Appearance', money: 'Money', gear: 'Gear', kit: 'Kit',
   backstory: 'Backstory', notes: 'Notes',
   stats: 'Stats & skills', hp: 'HP', dying: 'Dropping', wear: 'Wear',
 };
@@ -60,7 +62,7 @@ const FIELD_TYPES = {
 };
 // Sheet lists are always saved whole, so a missing list can never be
 // recreated as an object by a nested patch (the v2 "blank page" bug).
-const LIST_KEYS = ['gear', 'custom', 'hidden'];
+const LIST_KEYS = ['gear', 'kit', 'custom', 'hidden'];
 
 // The Vault, laid out like the sketch: A–J left, K–O centre top, P–Y right.
 const VAULT_LEFT  = 'ABCDEFGHIJ'.split('');
@@ -68,7 +70,8 @@ const VAULT_MID   = 'KLMNO'.split('');
 const VAULT_RIGHT = 'PQRSTUVWXY'.split('');
 const VAULT_STATES = { '': 'Unmarked', open: 'Open', progress: 'In progress', complete: 'Complete' };
 
-const blankGear = (kind = 'item') => ({ name: '', kind, dice: 1, stat: 'strength', bonus: 0 });
+const blankGear = (kind = 'item') => ({ name: '', kind, dice: 1, die: 6, stat: 'strength', bonus: 0, effect: '' });
+const blankKit = (kind = 'apparel') => ({ name: '', kind, durability: 0, reduction: 0 });
 
 function blankSheet(name) {
   return {
@@ -82,6 +85,7 @@ function blankSheet(name) {
     money: { rolled: null, left: null },
     wear: 0,
     gear: [blankGear(), blankGear(), blankGear()],
+    kit: [],               // [{ name, kind: 'apparel'|'armor', durability, reduction }]
     backstory: '', notes: '',
     custom: [],   // [{ id, title, tab: 'bio'|'attr', fields: [{ id, label, type, value, max, formula }] }]
     hidden: [],   // core panel keys this sheet hides
@@ -137,6 +141,7 @@ function normalize(raw) {
   const out = withDefaults(blankSheet(), d);
   // Gear used to be plain strings; now each slot is an item or a weapon.
   out.gear = out.gear.map(g => (isObj(g) ? { ...blankGear(), ...g } : { ...blankGear(), name: String(g ?? '') }));
+  out.kit = out.kit.map(k => (isObj(k) ? { ...blankKit(), ...k } : { ...blankKit(), name: String(k ?? '') }));
   return out;
 }
 function getPath(obj, path) {
@@ -156,6 +161,7 @@ function statMod(data, k) {
   return v == null ? 0 : (MOD[v] ?? 0);
 }
 function statPart(data, k) {
+  if (!k) return { label: 'No stat', value: 0 };
   const v = data.stats[k];
   return { label: `${stat(k).n}${v == null ? '' : ' (' + v + ')'}`, value: statMod(data, k) };
 }
@@ -202,6 +208,12 @@ const S = {
   wins: lsJSON('debt.wins', {}),  // scene id -> { x, y, w, h, min, full }
   chat: [],
   chatDraft: '',
+  chatPrivate: false,    // player: send privately to the GM
+  chatTo: '',            // GM: '' = everyone, or a character id for a private message
+  penWidth: +lsGet('debt.pen') || 3,
+  gmColor: lsGet('debt.gmcolor') || GM_COLOR,
+  rulesTab: 'crew',
+  gmSessions: null,
   since: null,
   ready: false,
   syncing: false,
@@ -227,7 +239,7 @@ const isGM = () => !!S.me && S.me.role === 'gm';
 const mine = () => S.me && S.me.sheet_id;
 const canEdit = rec => !!rec && (isGM() || rec.id === mine());
 const myName = () => (isGM() ? 'GM' : (S.sheets.get(mine()) || { data: { name: 'Player' } }).data.name);
-const myColor = () => { const r = S.sheets.get(mine()); return r ? accentOf(r) : GM_COLOR; };
+const myColor = () => { if (isGM()) return S.gmColor; const r = S.sheets.get(mine()); return r ? accentOf(r) : GM_COLOR; };
 const saveWins = () => lsSet('debt.wins', JSON.stringify(S.wins));
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -265,7 +277,8 @@ const ERRORS = {
   too_big: 'That is too big to save. Try a smaller picture.',
   too_short: 'Use at least 4 characters.',
   not_found: 'That no longer exists. It may have been deleted.',
-  empty: 'Type a message first.',
+  empty: 'Type something first.',
+  pick_player: 'Pick who the private message is for.',
 };
 function fail(err) {
   if (err && err.code === '28P01') return signOut('You were signed out. Log in again.');
@@ -546,7 +559,8 @@ async function roll({ sheetId = null, label, kind = 'free', n = 2, sides = 6, pa
   } catch (err) { fail(err); return null; }
 }
 
-const isDoubles = r => r.sides === 6 && r.dice.length === 2 && r.dice[0] === r.dice[1];
+// Doubles = exactly two dice showing the same face, on any die type.
+const isDoubles = r => r.dice.length === 2 && r.dice[0] === r.dice[1];
 
 // "2d6+wits+perception+2" -> { n, sides, parts }. Stat and skill names need a sheet.
 function parseFormula(str, data) {
@@ -905,7 +919,10 @@ function crewHTML() {
           <h2>Chat</h2>
           <div class="chat-list" id="chat-list"></div>
           <form class="chat-form" id="chat-form">
-            <input id="chat-input" data-fk="chat-input" placeholder="Say something to the crew…" autocomplete="off" maxlength="1000" value="${esc(S.chatDraft)}" aria-label="Chat message">
+            ${isGM()
+              ? `<select id="chat-to" aria-label="Send to"><option value="">To everyone</option>${orderedSheets().map(r => `<option value="${r.id}" ${S.chatTo === r.id ? 'selected' : ''}>Private to ${esc(r.data.name)}</option>`).join('')}</select>`
+              : `<button type="button" class="btn sm chat-priv ${S.chatPrivate ? 'on' : ''}" data-act="chat-priv" aria-pressed="${S.chatPrivate}" title="Only the GM sees it">${EYE_OFF_SVG} GM only</button>`}
+            <input id="chat-input" data-fk="chat-input" placeholder="${chatPlaceholder()}" autocomplete="off" maxlength="1000" value="${esc(S.chatDraft)}" aria-label="Chat message">
             <button class="btn brass" type="submit">Send</button>
           </form>
         </section>
@@ -925,17 +942,32 @@ function crewHTML() {
     </div>`;
 }
 
+function chatPlaceholder() {
+  if (isGM()) { const r = S.sheets.get(S.chatTo); return r ? `Private message to ${r.data.name}…` : 'Say something to the crew…'; }
+  return S.chatPrivate ? 'Private message to the GM…' : 'Say something to the crew…';
+}
+
 function renderChat(force) {
   const list = $('#chat-list');
   if (!list) return;
   const nearBottom = force || list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+  const nameOf = id => { const r = S.sheets.get(id); return r ? r.data.name : 'a player'; };
   list.innerHTML = S.chat.length ? S.chat.map(m => {
     const rec = m.sheet_id && S.sheets.get(m.sheet_id);
     const color = rec ? accentOf(rec) : GM_COLOR;
+    let tag = '';
+    if (m.private) {
+      const fromMe = isGM() ? !m.sheet_id : m.sheet_id === mine();
+      tag = isGM()
+        ? (m.sheet_id ? `Private from ${esc(m.who)}` : `Private to ${esc(nameOf(m.to_sheet))}`)
+        : (fromMe ? 'Private to the GM' : 'Private from the GM');
+      tag = `<span class="tag private">${EYE_OFF_SVG} ${tag}</span>`;
+      if (isGM() && m.sheet_id && !fromMe) tag += ` <button class="btn sm ghost chat-reply" data-act="chat-reply" data-id="${m.sheet_id}">Reply privately</button>`;
+    }
     return `
-      <div class="chat-msg">
+      <div class="chat-msg ${m.private ? 'private' : ''}">
         ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
-        <div><b style="color:${esc(color)}">${esc(m.who)}</b> <span class="chat-time">${relTime(m.created_at)}</span>
+        <div><b style="color:${esc(color)}">${esc(m.who)}</b> <span class="chat-time">${relTime(m.created_at)}</span> ${tag}
           <div class="chat-body">${esc(m.body)}</div></div>
       </div>`;
   }).join('') : '<p class="small dim" style="margin:auto">No messages yet.</p>';
@@ -1004,7 +1036,7 @@ function sheetHTML(rec) {
       <section class="panel">
         <div class="sheet-head">
           <label class="portrait-btn ${ed ? '' : 'ro'}" title="${ed ? 'Change portrait' : ''}">
-            ${avatarHTML(rec, 'lg')}${ed ? '<span>Change</span><input type="file" accept="image/*" class="portrait-input" data-sheet-file="' + rec.id + '">' : ''}
+            ${avatarHTML(rec, 'lg')}${ed ? '<span class="chg">Change</span><input type="file" accept="image/*" class="portrait-input" data-sheet-file="' + rec.id + '">' : ''}
           </label>
           <div class="sheet-id">
             <input class="name-input" data-bind="name" value="${esc(d.name)}" aria-label="Character name" placeholder="Name" ${ed ? '' : 'disabled'}>
@@ -1045,17 +1077,46 @@ function gearRow(d, g, i) {
           <option value="weapon" ${weapon ? 'selected' : ''}>Weapon</option>
         </select>
         <input data-bind="gear.${i}.name" value="${esc(g.name)}" placeholder="${weapon ? 'Weapon name' : 'Item'}" aria-label="Gear slot ${i + 1}">
+        ${weapon ? `<button class="roll-btn" data-act="roll-weapon" data-i="${i}" title="Roll damage: ${g.dice || 1}d${g.die || 6} ${signed(m)}" aria-label="Roll ${esc(g.name || 'weapon')} damage">${DIE_SVG}</button>` : ''}
         <button class="icon-btn" data-act="gear-del" data-i="${i}" aria-label="Remove slot ${i + 1}">×</button>
       </div>
       ${weapon ? `
         <div class="weapon-row">
           <label class="wfield"><span>Damage</span>
-            <span class="row" style="gap:4px"><input type="number" min="1" max="20" data-type="num" data-bind="gear.${i}.dice" value="${esc(g.dice || 1)}" aria-label="Damage dice"><span class="dim">d6</span></span></label>
+            <span class="row" style="gap:4px;flex-wrap:nowrap">
+              <input type="number" min="1" max="20" data-type="num" data-bind="gear.${i}.dice" value="${esc(g.dice || 1)}" aria-label="Number of damage dice">
+              <select data-bind="gear.${i}.die" data-type="num" aria-label="Damage die">${WEAPON_DIE.map(n => `<option value="${n}" ${(+g.die || 6) === n ? 'selected' : ''}>d${n}</option>`).join('')}</select>
+            </span></label>
           <label class="wfield"><span>+ Stat</span>
-            <select data-bind="gear.${i}.stat" aria-label="Damage stat">${STATS.map(s => `<option value="${s.k}" ${g.stat === s.k ? 'selected' : ''}>${s.n}</option>`).join('')}</select></label>
+            <select data-bind="gear.${i}.stat" aria-label="Damage stat">
+              <option value="" ${g.stat ? '' : 'selected'}>No stat (+0)</option>
+              ${STATS.map(s => `<option value="${s.k}" ${g.stat === s.k ? 'selected' : ''}>${s.n}</option>`).join('')}
+            </select></label>
           <label class="wfield"><span>+ Bonus</span>
             <input type="number" data-type="num" data-bind="gear.${i}.bonus" value="${esc(g.bonus || 0)}" aria-label="Permanent damage bonus"></label>
-          <button class="btn sm brass" data-act="roll-weapon" data-i="${i}">${die(14)} ${g.dice || 1}d6 ${signed(m)}</button>
+          <label class="wfield grow"><span>Effect</span>
+            <input data-bind="gear.${i}.effect" value="${esc(g.effect || '')}" placeholder="e.g. Bleed, Knockdown" aria-label="Weapon effect"></label>
+        </div>` : ''}
+    </div>`;
+}
+
+function kitRow(k, i) {
+  const armor = k.kind === 'armor';
+  return `
+    <div class="gear-item ${armor ? 'armor' : ''}">
+      <div class="gear-row">
+        <span class="n">${i + 1}.</span>
+        <select data-bind="kit.${i}.kind" aria-label="Apparel or armor" class="gear-kind">
+          <option value="apparel" ${armor ? '' : 'selected'}>Apparel</option>
+          <option value="armor" ${armor ? 'selected' : ''}>Armor</option>
+        </select>
+        <input data-bind="kit.${i}.name" value="${esc(k.name)}" placeholder="${armor ? 'Armor name' : 'What you’re wearing'}" aria-label="Kit ${i + 1}">
+        <button class="icon-btn" data-act="kit-del" data-i="${i}" aria-label="Remove kit ${i + 1}">×</button>
+      </div>
+      ${armor ? `
+        <div class="weapon-row">
+          <label class="wfield"><span>Durability</span><input type="number" data-type="num" data-bind="kit.${i}.durability" value="${esc(k.durability ?? 0)}" aria-label="Durability"></label>
+          <label class="wfield"><span>Damage reduction</span><input type="number" data-type="num" data-bind="kit.${i}.reduction" value="${esc(k.reduction ?? 0)}" aria-label="Damage reduction"></label>
         </div>` : ''}
     </div>`;
 }
@@ -1080,11 +1141,18 @@ function bioTab(rec) {
       <div class="field"><label>Starting $</label><input type="number" data-type="num" data-bind="money.rolled" value="${esc(d.money.rolled)}"></div>
       <div class="field"><label>Left $</label><input type="number" data-type="num" data-bind="money.left" value="${esc(d.money.left)}"></div>`),
     panel(rec, 'gear', 's8', `
-      <p class="small dim" style="margin-top:-6px">${d.gear.length} slots · 3 to start, more can be earned. A weapon rolls its damage in d6s + a stat + a permanent bonus.</p>
+      <p class="small dim" style="margin-top:-6px">${d.gear.length} slots · 3 to start, more can be earned. A weapon rolls its damage dice + a stat + a permanent bonus.</p>
       ${d.gear.map((g, i) => gearRow(d, g, i)).join('')}
       <div class="row" style="margin-top:8px">
         <button class="btn sm" data-act="gear-add" data-kind="item">+ Item</button>
         <button class="btn sm" data-act="gear-add" data-kind="weapon">+ Weapon</button>
+      </div>`),
+    panel(rec, 'kit', 's12', `
+      <p class="small dim" style="margin-top:-6px">Apparel is anything you wear. Armor has Durability and Damage Reduction.</p>
+      ${d.kit.length ? d.kit.map(kitRow).join('') : '<p class="small dim">Nothing yet.</p>'}
+      <div class="row" style="margin-top:8px">
+        <button class="btn sm" data-act="kit-add" data-kind="apparel">+ Apparel</button>
+        <button class="btn sm" data-act="kit-add" data-kind="armor">+ Armor</button>
       </div>`),
     panel(rec, 'backstory', 's12', `
       <p class="small dim" style="margin-top:-6px">This is how you earn a Specialty.</p>
@@ -1262,10 +1330,23 @@ function customEditHTML(rec, sec, si) {
 // ── Rendering: rules ───────────────────────────────────────────────────────
 
 function rulesHTML() {
-  const gm = isGM();
+  const gm = isGM(), combatOn = !!S.settings.combat_visible;
+  const canCombat = gm || combatOn;
+  const tab = canCombat && S.rulesTab === 'combat' ? 'combat' : 'crew';
   return `
     <div class="wrap rules">
-      <h1 class="page-title">Crew rules</h1>
+      <h1 class="page-title">Rules</h1>
+      <div class="tabs" role="tablist">
+        <button role="tab" class="${tab === 'crew' ? 'on' : ''}" aria-selected="${tab === 'crew'}" data-act="rules-tab" data-t="crew">Crew rules</button>
+        ${canCombat ? `<button role="tab" class="${tab === 'combat' ? 'on' : ''}" aria-selected="${tab === 'combat'}" data-act="rules-tab" data-t="combat">Combat rules${gm && !combatOn ? ' <small class="hidden-tag">hidden from players</small>' : ''}</button>` : ''}
+      </div>
+      ${tab === 'combat' ? combatRulesHTML() : crewRulesHTML()}
+    </div>`;
+}
+
+function crewRulesHTML() {
+  const gm = isGM();
+  return `
       <div class="grid">
         <section class="panel s6">
           <h2>Stats</h2>
@@ -1305,10 +1386,6 @@ function rulesHTML() {
           </div>
           <p class="note">Act on your Vice or Virtue and the crew gains +1 Grit.</p>
         </section>
-        <section class="panel s6">
-          <h2>Gear &amp; weapons</h2>
-          <p>3 gear slots to start, more can be earned. A weapon deals its damage in d6s, plus a stat and any permanent bonus it has.</p>
-        </section>
         <section class="panel s12">
           <h2>Skills: roll the stat that fits</h2>
           <p class="small"><span class="hl">Pick 3 at +1</span> or <span class="hl">pick 2 at +2</span>, your choice. Each skill belongs to one stat and is always rolled with it.</p>
@@ -1320,8 +1397,81 @@ function rulesHTML() {
           ${gm ? `<textarea id="rules-note" data-fk="rules-note" rows="8" placeholder="House rules, clarifications, anything the crew should read. Players see this but can’t edit it.">${esc(S.rulesNote)}</textarea>`
                : `<div class="rules-note">${esc(S.rulesNote)}</div>`}
         </section>` : ''}
-      </div>
-    </div>`;
+      </div>`;
+}
+
+// Combat rules, from the GM's "Crew Rules: Combat" sheet. Reference only:
+// nothing else in the app uses these numbers.
+const COMBAT_WEAPONS = [
+  ['Punch', '1d3', '—'], ['Kick', '1d3', '—'], ['Knife', '1d4+2', 'Bleed'], ['Baseball bat', '1d4+1', 'Knockdown'],
+  ['Brass knuckles', '1d4+1', '—'], ['Baton', 'None', 'Disarm'], ['Taser', '1d2+1', 'Stun'],
+  ['Pepper spray', '1d2+1', 'Blind'], ['Pistol', '1d5', '—'], ['Shotgun', '1d8+1', 'Knockdown'],
+];
+const COMBAT_ARMOR = [
+  ['Thick coat', 1, '2 hits'], ['Work boots', 1, '2 hits'], ['Motorcycle helmet', 1, '2 hits'],
+  ['Kevlar vest', 2, '4 hits'], ['Ballistic plate', 3, '6 hits'],
+];
+const COMBAT_STATUS = [
+  ['Bleed', 'Lose 1 HP at the start of each turn until bandaged.', 'Stopped by: bandages or healing'],
+  ['Knockdown', 'Fall prone. Lose your next turn standing up.', 'Resist: 2d6 + Strength'],
+  ['Disarm', 'Drop your weapon.', 'Resist: 2d6 + Strength'],
+  ['Pinned', 'Can’t move. Can still act, but can’t leave.', 'Resist: 2d6 + Strength'],
+  ['Silenced', 'Can’t call for help. Can’t shout.', 'Resist: 2d6 + Strength'],
+  ['Deafened', 'Can’t hear. Miss verbal cues. Can’t coordinate.', 'Resist: 2d6 + Composure'],
+  ['Shaken', '−1 to your next roll.', 'Resist: 2d6 + Composure'],
+  ['Stunned', 'Lose your next turn.', 'Resist: 2d6 + Composure'],
+  ['Blinded', 'Can’t see for one round. −2 to all rolls.', 'Resist: 2d6 + Composure'],
+];
+
+function combatRulesHTML() {
+  const gm = isGM(), on = !!S.settings.combat_visible;
+  return `
+      ${gm ? `<div class="banner ${on ? '' : 'lock'}">
+        ${on ? 'Players can see this tab.' : `${EYE_OFF_SVG} Hidden from players. Only you can see it.`}
+        <span class="spacer"></span>
+        <button class="btn sm ${on ? '' : 'brass'}" data-act="combat-show" data-v="${on ? 0 : 1}">${on ? 'Hide from players' : 'Show to players'}</button>
+      </div>` : ''}
+      <div class="grid combat">
+        <div class="s6" style="display:grid;gap:16px;align-content:start">
+          <section class="panel">
+            <h2>Attacking</h2>
+            <p>When you attack, roll 2d6 plus a stat.</p>
+            <p><span class="hl">Dexterity</span> for aimed weapons: pistol, shotgun, taser, pepper spray, knife.</p>
+            <p><span class="hl">Strength</span> for swung weapons and fists: punch, kick, bat, brass knuckles, baton.</p>
+            <h3>When you hit, choose one</h3>
+            <p><span class="hl">Damage.</span> Roll damage. They take it. Armor reduces it.</p>
+            <p><span class="hl">Effect.</span> They resist. If they fail, they get the effect. No damage.</p>
+          </section>
+          <section class="panel">
+            <h2>HP and dropping to 0</h2>
+            <p>When you hit 0 HP, you drop. You roll 2d6 + Composure.</p>
+            <div class="tiers">
+              <div><b>10+</b><span>You’re stable. You’re out, but you’ll live.</span></div>
+              <div><b>7–9</b><span>Mark a success. Roll again next round.</span></div>
+              <div><b>6−</b><span>Mark a fail. Roll again next round.</span></div>
+            </div>
+            <p>Three successes and you stabilize. You’re unconscious but alive.</p>
+            <p class="warn">Three fails and you’re dead.</p>
+          </section>
+        </div>
+        <div class="s6" style="display:grid;gap:16px;align-content:start">
+          <section class="panel">
+            <h2>Weapons</h2>
+            <table class="rtable"><thead><tr><th>Weapon</th><th>Damage</th><th>Effect</th></tr></thead>
+              <tbody>${COMBAT_WEAPONS.map(w => `<tr><td>${w[0]}</td><td>${w[1]}</td><td>${w[2]}</td></tr>`).join('')}</tbody></table>
+          </section>
+          <section class="panel">
+            <h2>Armor</h2>
+            <table class="rtable"><thead><tr><th>Armor</th><th>Reduces</th><th>Breaks after</th></tr></thead>
+              <tbody>${COMBAT_ARMOR.map(a => `<tr><td>${a[0]}</td><td>${a[1]}</td><td>${a[2]}</td></tr>`).join('')}</tbody></table>
+            <p class="dim small" style="margin-top:10px">You can wear multiple pieces.</p>
+          </section>
+        </div>
+        <section class="panel s12">
+          <h2>Status effects</h2>
+          <div class="st">${COMBAT_STATUS.map(x => `<div><b>${x[0]}</b>${x[1]}<i>${x[2]}</i></div>`).join('')}</div>
+        </section>
+      </div>`;
 }
 
 // ── Rendering: GM page ─────────────────────────────────────────────────────
@@ -1352,8 +1502,8 @@ function gmHTML() {
           <div class="row" style="margin-top:12px"><button class="btn sm" data-act="new-sheet">+ New character</button></div>
         </section>
         <section class="panel s6">
-          <h2><span class="grow">GM Session Notes</span><span class="saving" id="gm-saving-session"></span></h2>
-          <textarea id="gm-notes-session" data-fk="gm-notes-session" rows="14" placeholder="This session: who’s where, what happened, what’s next.">${esc(notes.session)}</textarea>
+          <h2><span class="grow">GM Session Notes</span><button class="btn sm brass" data-act="session-add">+ New session</button></h2>
+          ${sessionsHTML()}
         </section>
         <section class="panel s6">
           <h2><span class="grow">GM Notes</span><span class="saving" id="gm-saving-body"></span></h2>
@@ -1364,6 +1514,8 @@ function gmHTML() {
           <label class="row setting"><input type="checkbox" data-setting="reroll_grit" ${S.settings.reroll_grit ? 'checked' : ''}>
             <span>A Wear reroll also rerolls the Grit die on that roll</span></label>
           <p class="small dim">Off: only the original dice are rerolled and the Grit die stays.</p>
+          <label class="row setting" style="margin-top:10px"><input type="checkbox" data-setting="combat_visible" ${S.settings.combat_visible ? 'checked' : ''}>
+            <span>Show the Combat rules tab to players</span></label>
         </section>
         <section class="panel s4">
           <h2>Session Grit roll</h2>
@@ -1394,10 +1546,31 @@ function gmHTML() {
     </div>`;
 }
 
+function sortedSessions() {
+  return [...(S.gmSessions || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
+}
+// Session #1 is the earliest; the newest is shown first.
+function sessionsHTML() {
+  if (S.gmSessions === null) return '<p class="small dim">Loading…</p>';
+  const list = sortedSessions();
+  if (!list.length) return '<p class="small dim">No session notes yet. Start one for today.</p>';
+  return `<div class="sessions">${list.map((g, i) => ({ g, n: i + 1 })).reverse().map(({ g, n }) => `
+    <div class="session-note">
+      <div class="row">
+        <b class="session-num">Session #${n}</b>
+        <input type="date" data-session-date="${g.id}" value="${esc(g.date)}" aria-label="Date of session ${n}">
+        <span class="saving" id="ss-${g.id}"></span>
+        <span class="spacer"></span>
+        <button class="icon-btn" data-act="session-del" data-id="${g.id}" aria-label="Delete session ${n} notes">×</button>
+      </div>
+      <textarea data-session-body="${g.id}" data-fk="sb-${g.id}" rows="5" placeholder="What happened in session ${n}…" aria-label="Notes for session ${n}">${esc(g.body)}</textarea>
+    </div>`).join('')}</div>`;
+}
+
 async function loadGM() {
   try {
-    const [notes, deleted] = await Promise.all([api('gm_get_notes'), api('gm_deleted_sheets')]);
-    S.gmNotes = notes; S.deleted = deleted;
+    const [notes, deleted, sessions] = await Promise.all([api('gm_get_notes'), api('gm_deleted_sheets'), api('gm_sessions')]);
+    S.gmNotes = notes; S.deleted = deleted; S.gmSessions = sessions;
     if (S.route.view === 'gm') renderMain();
   } catch (err) { fail(err); }
 }
@@ -1515,13 +1688,47 @@ function canvasFor(sc) {
 }
 
 function toolsHTML(sc) {
+  const gm = isGM();
   return `
     <div class="draw-tools">
-      ${['pen', 'erase', 'ping'].map(t => `<button class="tool ${S.tool === t ? 'on' : ''}" data-tool="${t}">${{ pen: '✎ Pen', erase: '⌫ Erase', ping: '◎ Ping' }[t]}</button>`).join('')}
-      <span class="swatch" style="background:${esc(myColor())}" title="Your colour"></span>
+      ${['pen', 'erase', 'text', 'ping'].map(t => `<button class="tool ${S.tool === t ? 'on' : ''}" data-tool="${t}">${{ pen: '✎ Pen', erase: '⌫ Erase', text: 'T Text', ping: '◎ Ping' }[t]}</button>`).join('')}
+      <span class="widths" role="radiogroup" aria-label="Pen and text size">${PEN_WIDTHS.map(w => `<button class="wbtn ${S.penWidth === w ? 'on' : ''}" data-width="${w}" role="radio" aria-checked="${S.penWidth === w}" aria-label="Size ${w}" title="Size ${w}"><i style="width:${Math.min(15, w + 2)}px;height:${Math.min(15, w + 2)}px"></i></button>`).join('')}</span>
+      ${gm ? `<label class="swatch gm-swatch" title="Your pen colour (GM only)" style="background:${esc(myColor())}"><input type="color" value="${esc(myColor())}" data-gm-color aria-label="Pen colour"></label>`
+           : `<span class="swatch" style="background:${esc(myColor())}" title="Your colour"></span>`}
       <span class="spacer"></span>
-      ${isGM() ? `<button class="btn sm ghost" data-clear="${sc.id}">Clear all</button>` : ''}
+      ${gm ? `<button class="btn sm ghost" data-clear="${sc.id}">Clear all</button>` : ''}
     </div>`;
+}
+
+// Text size on the scene, in CSS px for a box `boxW` wide.
+const textPx = (w, boxW) => (12 + w * 2.2) * (boxW / 900);
+
+function openTextInput(c, x, y) {
+  c.box.querySelectorAll('.text-entry').forEach(n => n.remove());
+  const inp = document.createElement('input');
+  inp.className = 'text-entry';
+  inp.maxLength = 300;
+  inp.placeholder = 'Type, then Enter';
+  inp.style.left = (x * 100) + '%'; inp.style.top = (y * 100) + '%';
+  inp.style.color = myColor();
+  inp.style.fontSize = Math.max(11, textPx(S.penWidth, c.box.clientWidth)) + 'px';
+  c.box.appendChild(inp);
+  setTimeout(() => inp.focus(), 0);
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const text = inp.value.trim();
+    inp.remove();
+    if (!save || !text) return;
+    try {
+      const st = await api('add_stroke', { p_scene: c.id, p_color: myColor(), p_width: S.penWidth, p_points: [x, y], p_text: text });
+      applyStroke(st); redraw(c); ping();
+    } catch (err) { fail(err); }
+  };
+  inp.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') finish(true); else if (ev.key === 'Escape') finish(false); });
+  inp.addEventListener('blur', () => finish(true));
+  inp.addEventListener('pointerdown', ev => ev.stopPropagation());
 }
 
 function makeCanvas(sc) {
@@ -1536,6 +1743,12 @@ function makeCanvas(sc) {
   el.addEventListener('click', e => {
     const t = e.target.closest('[data-tool]');
     if (t) { S.tool = t.dataset.tool; document.querySelectorAll('.draw-tools .tool').forEach(b => b.classList.toggle('on', b.dataset.tool === S.tool)); document.querySelectorAll('.draw-box').forEach(b => b.dataset.tool = S.tool); return; }
+    const wb = e.target.closest('[data-width]');
+    if (wb) {
+      S.penWidth = +wb.dataset.width; lsSet('debt.pen', String(S.penWidth));
+      document.querySelectorAll('.wbtn').forEach(b => { const on = +b.dataset.width === S.penWidth; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+      return;
+    }
     const clr = e.target.closest('[data-clear]');
     if (clr && confirm('Clear every marking on this scene for everyone?')) {
       api('gm_clear_strokes', { p_scene: c.id }).then(() => { const m = S.strokes.get(c.id); if (m) m.clear(); redrawScene(c.id); ping(); }).catch(fail);
@@ -1554,10 +1767,11 @@ function makeCanvas(sc) {
     if (e.button !== 0) return;
     const [x, y] = norm(e);
     if (S.tool === 'ping') { const p = { scene: c.id, x, y, color: myColor(), who: myName() }; showLocPing(p); send('loc', p); return; }
+    if (S.tool === 'text') { e.preventDefault(); openTextInput(c, x, y); return; }
     e.preventDefault();
     try { box.setPointerCapture(e.pointerId); } catch { /* synthetic or lost pointer */ }
     S.drawing = true;
-    if (S.tool === 'pen') c.cur = { did: uid(), color: myColor(), width: 3, points: [x, y], sent: 0 };
+    if (S.tool === 'pen') c.cur = { did: uid(), color: myColor(), width: S.penWidth, points: [x, y], sent: 0 };
     else { c.erase = new Set(); eraseAt(c, e); }
   });
   box.addEventListener('pointermove', e => {
@@ -1627,7 +1841,16 @@ function redraw(c) {
   ctx.clearRect(0, 0, W, H);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const scale = W / 900;
-  const draw = s => { ctx.strokeStyle = s.color; ctx.lineWidth = Math.max(1.5, s.width * scale); strokePath(ctx, s.points, W, H); ctx.stroke(); };
+  const draw = s => {
+    if (s.text) {
+      ctx.fillStyle = s.color;
+      ctx.font = `${Math.round((12 + s.width * 2.2) * scale)}px "Special Elite", "Courier New", monospace`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(s.text, s.points[0] * W, s.points[1] * H);
+      return;
+    }
+    ctx.strokeStyle = s.color; ctx.lineWidth = Math.max(1.5, s.width * scale); strokePath(ctx, s.points, W, H); ctx.stroke();
+  };
   for (const s of (S.strokes.get(c.id) || new Map()).values()) draw(s);
   for (const d of S.drafts.values()) if (d.scene === c.id && d.points.length >= 2) draw(d);
   if (c.cur) draw(c.cur);
@@ -1642,6 +1865,11 @@ function eraseAt(c, e) {
   let hit = false;
   for (const [id, s] of m) {
     const p = s.points;
+    if (s.text) {
+      const fs = textPx(s.width, r.width), x0 = p[0] * r.width, yc = p[1] * r.height;
+      if (px > x0 - R && px < x0 + s.text.length * fs * 0.62 + R && Math.abs(py - yc) < fs / 2 + R) { c.erase.add(id); m.delete(id); hit = true; }
+      continue;
+    }
     for (let i = 0; i < p.length - 2; i += 2) {
       if (segDist(px, py, p[i] * r.width, p[i + 1] * r.height, p[i + 2] * r.width, p[i + 3] * r.height) < R) {
         c.erase.add(id); m.delete(id); hit = true; break;
@@ -1812,8 +2040,10 @@ function entryHTML(r) {
   const accent = rec ? accentOf(rec) : 'var(--line)';
   const dbl = isDoubles(r) && r.kind !== 'grit_session';
   const animDice = S.anim.has(r.id + ':dice'), animGrit = S.anim.has(r.id + ':grit');
-  const dice = r.dice.map((v, i) => `<span class="die ${dbl ? 'dbl' : ''} ${animDice ? 'tumble' : ''}" style="--i:${i}">${v}</span>`).join('');
-  const grit = (r.extras || []).map(e => `<span class="die grit ${animGrit ? 'tumble' : ''}" title="Grit from ${esc(e.who)}">${e.die}</span>`).join('');
+  // A 1 is red, the top face (6 on a d6) is green.
+  const face = (v, sides) => (v === 1 ? 'one' : v === sides ? 'max' : '');
+  const dice = r.dice.map((v, i) => `<span class="die ${face(v, r.sides)} ${dbl ? 'dbl' : ''} ${animDice ? 'tumble' : ''}" style="--i:${i}">${v}</span>`).join('');
+  const grit = (r.extras || []).map(e => `<span class="die grit ${face(e.die, 6)} ${animGrit ? 'tumble' : ''}" title="Grit from ${esc(e.who)}">${e.die}</span>`).join('');
   const mods = (r.parts || []).map(p => `<span class="mod-inline" title="${esc(p.label)}">${signed(+p.value)}</span>`).join('');
 
   const tags = [];
@@ -1859,7 +2089,7 @@ function renderLog() {
   const listEl = $('#log-list');
   const scroll = listEl ? listEl.scrollTop : 0;
   const keep = id => ($('#' + id) ? $('#' + id).value : '');
-  const draft = keep('free-input'), label = keep('mr-label');
+  const label = keep('mr-label');
   const focusId = document.activeElement && document.activeElement.id;
   const mr = S.mr;
   log.className = 'log' + (S.logOpen ? ' open' : '');
@@ -1881,14 +2111,11 @@ function renderLog() {
         <div class="die-types" role="radiogroup" aria-label="Die type">
           ${DICE_TYPES.map(t => `<button class="btn ${mr.sides === t ? 'on' : ''}" data-act="mr-sides" data-v="${t}" role="radio" aria-checked="${mr.sides === t}">d${t}</button>`).join('')}
         </div>
-        <div class="roller-row">
-          <input id="mr-label" placeholder="What’s it for? (optional)" aria-label="Roll label" autocomplete="off">
-          <button class="btn brass" data-act="mr-roll">${die(15)} Roll ${mr.n}d${mr.sides}${mr.mod ? signed(mr.mod).replace('−', '-') : ''}</button>
-        </div>
-        <form class="free-roll" id="free-form">
-          <input id="free-input" placeholder="or type: 2d6+wits+perception" aria-label="Dice formula" autocomplete="off">
-          <button class="btn" type="submit">Roll</button>
+        <form class="roller-row" id="mr-form">
+          <input id="mr-label" placeholder="Label, or a formula: 2d6+wits+perception" aria-label="Roll label or formula" autocomplete="off">
+          <button class="btn brass" type="submit">${die(15)} Roll</button>
         </form>
+        <div class="small dim" id="mr-hint">${mrHint('')}</div>
       </div>
       <div class="small dim">Rolling as <b style="color:var(--paper)">${esc(myName())}</b>${S.private ? ' · <span class="warn">private</span>' : ''}</div>
     </div>
@@ -1897,25 +2124,46 @@ function renderLog() {
     </div>`;
   S.anim.clear();
   $('#log-list').scrollTop = scroll;
-  $('#free-input').value = draft;
   $('#mr-label').value = label;
-  if (focusId === 'free-input' || focusId === 'mr-label') $('#' + focusId).focus();
-  $('#free-form').onsubmit = e => { e.preventDefault(); freeRoll($('#free-input').value); };
+  $('#mr-hint').innerHTML = mrHint(label);
+  if (focusId === 'mr-label') $('#mr-label').focus();
+  $('#mr-form').onsubmit = e => { e.preventDefault(); rollerSubmit($('#mr-label').value); };
   const fab = $('#fab-last');
   if (fab) fab.textContent = rolls[0] ? rolls[0].total : '';
 }
 
-function freeRoll(text) {
-  const rec = S.sheets.get(mine());
-  const f = parseFormula(text, rec && rec.data);
-  if (!f) {
-    toast(rec || !/[a-z]{3}/i.test(String(text).replace(/d\d+/gi, ''))
-      ? 'Try something like 2d6+1, 1d20 or 2d6+wits+perception.'
-      : 'Stats and skills in a formula only work when you’re logged in as a character.', true);
-    return;
+// The roller input is either a formula ("2d6+wits+perception") or a label
+// for the dice picked with the steppers above it.
+const looksLikeFormula = t => /^\s*\d*\s*d\s*\d+/i.test(t);
+function mrDice() { return `${S.mr.n}d${S.mr.sides}${S.mr.mod ? signed(S.mr.mod).replace('−', '-') : ''}`; }
+function mrHint(text) {
+  if (looksLikeFormula(text)) {
+    const rec = S.sheets.get(mine());
+    const f = parseFormula(text, rec && rec.data);
+    return f ? `Rolls <b>${esc(text.trim())}</b>${f.parts.length ? ' · ' + f.parts.map(p => `${esc(p.label)} ${signed(p.value)}`).join(', ') : ''}`
+             : `<span class="warn">Can’t read that formula yet</span>`;
   }
-  roll({ sheetId: rec ? rec.id : null, label: String(text).trim(), kind: 'free', ...f });
-  $('#free-input').value = '';
+  return `Rolls <b>${mrDice()}</b>${text.trim() ? ` as “${esc(text.trim())}”` : ''}`;
+}
+
+function rollerSubmit(text) {
+  const rec = S.sheets.get(mine());
+  const t = String(text || '').trim();
+  if (looksLikeFormula(t)) {
+    const f = parseFormula(t, rec && rec.data);
+    if (!f) {
+      toast(rec || !/[a-z]{3}/i.test(t.replace(/d\d+/gi, ''))
+        ? 'Try something like 2d6+1, 1d20 or 2d6+wits+perception.'
+        : 'Stats and skills in a formula only work when you’re logged in as a character.', true);
+      return;
+    }
+    roll({ sheetId: rec ? rec.id : null, label: t, kind: 'free', ...f });
+  } else {
+    roll({ sheetId: rec ? rec.id : null, label: t || mrDice(), kind: 'free', n: S.mr.n, sides: S.mr.sides,
+           parts: S.mr.mod ? [{ label: 'Modifier', value: S.mr.mod }] : [] });
+  }
+  $('#mr-label').value = '';
+  $('#mr-hint').innerHTML = mrHint('');
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -2001,6 +2249,17 @@ document.addEventListener('input', e => {
     return debouncedSave('rules', () => api('gm_set_rules_note', { p_body: el.value }), 'rules-saving');
   }
   if (el.id === 'chat-input') { S.chatDraft = el.value; return; }
+  if (el.id === 'mr-label') { $('#mr-hint').innerHTML = mrHint(el.value); return; }
+  if (el.dataset.gmColor !== undefined) {
+    S.gmColor = el.value; lsSet('debt.gmcolor', el.value);
+    document.querySelectorAll('.gm-swatch').forEach(sw => { sw.style.background = el.value; });
+    return;
+  }
+  if (el.dataset.sessionBody) {
+    const id = el.dataset.sessionBody, g = (S.gmSessions || []).find(x => String(x.id) === id);
+    if (g) g.body = el.value;
+    return debouncedSave('ss-' + id, () => api('gm_session_save', { p_id: +id, p_date: null, p_body: el.value }), 'ss-' + id);
+  }
   if (el.dataset.sceneField) return sceneFieldChanged(el);
   if (!el.dataset.bind || el.tagName === 'SELECT' || el.type === 'checkbox' || el.type === 'color') return;
   const rec = currentSheet(el);
@@ -2014,6 +2273,13 @@ document.addEventListener('change', async e => {
   if (el.dataset.sheetFile) {
     const file = el.files[0]; el.value = '';
     if (file) setPortrait(el.dataset.sheetFile, file);
+    return;
+  }
+  if (el.id === 'chat-to') { S.chatTo = el.value; $('#chat-input').placeholder = chatPlaceholder(); return; }
+  if (el.dataset.sessionDate) {
+    const id = el.dataset.sessionDate, g = (S.gmSessions || []).find(x => String(x.id) === id);
+    try { const saved = await api('gm_session_save', { p_id: +id, p_date: el.value || null, p_body: null }); if (g) g.date = saved.date; renderMain(); }
+    catch (err) { fail(err); }
     return;
   }
   if (el.dataset.setting) {
@@ -2038,7 +2304,8 @@ document.addEventListener('submit', async e => {
     const body = S.chatDraft.trim();
     if (!body) return;
     try {
-      const m = await api('chat_send', { p_body: body });
+      const priv = isGM() ? !!S.chatTo : S.chatPrivate;
+      const m = await api('chat_send', { p_body: body, p_private: priv, p_to: isGM() ? (S.chatTo || null) : null });
       S.chatDraft = ''; $('#chat-input').value = '';
       if (!S.chat.some(x => x.id === m.id)) S.chat.push(m);
       renderChat(true); ping();
@@ -2170,7 +2437,34 @@ document.addEventListener('click', async e => {
     case 'roll-weapon': {
       const g = d.gear[i];
       const parts = [statPart(d, g.stat), { label: `${g.name || 'Weapon'} bonus`, value: +g.bonus || 0 }];
-      roll({ sheetId: rec.id, kind: 'damage', label: `${g.name || 'Weapon'} damage`, n: Math.max(1, Math.min(20, +g.dice || 1)), sides: 6, parts });
+      roll({ sheetId: rec.id, kind: 'damage', label: `${g.name || 'Weapon'} damage${g.effect ? ' · ' + g.effect : ''}`,
+             n: Math.max(1, Math.min(20, +g.dice || 1)), sides: Math.max(2, Math.min(10, +g.die || 6)), parts });
+      break;
+    }
+    case 'kit-add': commit(rec.id, 'kit', [...d.kit, blankKit(el.dataset.kind)]); renderMain(); break;
+    case 'kit-del': commit(rec.id, 'kit', d.kit.filter((_, j) => j !== i)); renderMain(); break;
+    case 'rules-tab': S.rulesTab = el.dataset.t; renderMain(); break;
+    case 'combat-show': {
+      try { S.settings = await api('gm_set_settings', { p_settings: { combat_visible: el.dataset.v === '1' } }); ping(); renderMain(); }
+      catch (err) { fail(err); }
+      break;
+    }
+    case 'chat-priv': S.chatPrivate = !S.chatPrivate; el.classList.toggle('on', S.chatPrivate); el.setAttribute('aria-pressed', S.chatPrivate); $('#chat-input').placeholder = chatPlaceholder(); break;
+    case 'chat-reply': S.chatTo = el.dataset.id; { const sel = $('#chat-to'); if (sel) sel.value = S.chatTo; } $('#chat-input').placeholder = chatPlaceholder(); $('#chat-input').focus(); break;
+    case 'session-add': {
+      try {
+        const g = await api('gm_session_save', { p_id: null, p_date: new Date().toLocaleDateString('en-CA'), p_body: '' });
+        S.gmSessions = [...(S.gmSessions || []), g];
+        renderMain();
+        const ta = $(`[data-session-body="${g.id}"]`); if (ta) ta.focus();
+      } catch (err) { fail(err); }
+      break;
+    }
+    case 'session-del': {
+      const list = sortedSessions(), n = list.findIndex(x => String(x.id) === el.dataset.id) + 1;
+      if (!confirm(`Delete Session #${n}’s notes?`)) break;
+      try { await api('gm_session_delete', { p_id: +el.dataset.id }); S.gmSessions = S.gmSessions.filter(x => String(x.id) !== el.dataset.id); renderMain(); }
+      catch (err) { fail(err); }
       break;
     }
     case 'roll-hp': {
@@ -2251,15 +2545,6 @@ document.addEventListener('click', async e => {
     case 'mr-n': S.mr.n = Math.max(1, Math.min(20, S.mr.n + dd)); renderLog(); break;
     case 'mr-mod': S.mr.mod = Math.max(-20, Math.min(20, S.mr.mod + dd)); renderLog(); break;
     case 'mr-sides': S.mr.sides = +el.dataset.v; renderLog(); break;
-    case 'mr-roll': {
-      const recMe = S.sheets.get(mine());
-      const lbl = ($('#mr-label').value || '').trim();
-      const formula = `${S.mr.n}d${S.mr.sides}${S.mr.mod ? signed(S.mr.mod).replace('−', '-') : ''}`;
-      roll({ sheetId: recMe ? recMe.id : null, label: lbl || formula, kind: 'free', n: S.mr.n, sides: S.mr.sides,
-             parts: S.mr.mod ? [{ label: 'Modifier', value: S.mr.mod }] : [] });
-      $('#mr-label').value = '';
-      break;
-    }
     case 'spend-grit': {
       el.disabled = true;
       try {
@@ -2435,7 +2720,7 @@ window.addEventListener('hashchange', () => {
   const prev = S.route;
   S.route = parseRoute();
   if (prev.view !== S.route.view || prev.id !== S.route.id) { S.customize = false; S.vaultMenu = null; window.scrollTo(0, 0); }
-  if (S.route.view === 'gm') S.gmNotes = null;
+  if (S.route.view === 'gm') { S.gmNotes = null; S.gmSessions = null; }
   if (S.logOpen && window.matchMedia('(max-width: 1100px)').matches) S.logOpen = false;
   if (!S.ready) return;
   renderNav(); renderMain(); renderLog();

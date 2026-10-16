@@ -20,6 +20,47 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 4 request (2026-10-17)
+
+Findings:
+- Portrait "only shows on hover": the CSS rule `.portrait-btn span` (for the
+  "Change" label) also matched the avatar, which became a `<span>` in v2, so
+  the avatar was hidden until hover.
+- Formula "no breakdown": BOBO's `2d6+2+wits+perception` went into the label
+  box of the manual roller, so it rolled plain 2d6 with that text as its label.
+  Fix: a single input that rolls formulas and otherwise acts as the label.
+- Custom-roller doubles not banking: those were 2d8 doubles, and only 2d6
+  banked. Now any 2 matching dice count as doubles.
+
+### Progress
+- [x] DB migration v4 (supabase/v4.sql)
+- [x] Front end v4
+- [x] Tested locally (GM + throwaway player), cleaned up
+- [x] Deployed (`?v=4`)
+
+### Items
+- [x] Fix the portrait picker (always visible, editable without hover). Test it visually.
+- [x] Weapon: "No stat" option (+0), damage die dropdown d2–d10, free-text Effect, roll button shows only a die icon.
+- [x] Kit panel: Apparel (free text) or Armor (Durability + Damage Reduction numbers, no roll).
+- [x] Drawing Board becomes a blackboard.
+- [x] Text tool: static text on the board and on scenes.
+- [x] 5 pen widths.
+- [x] GM-only pen colour picker.
+- [x] Private chat: players → GM. The GM can reply privately to one player. Clear indication for both sides.
+- [x] Dice input: formulas like `2d6+2+wits+perception` always parse (show the breakdown and grey mods).
+- [x] Dice faces: a 1 is a red box with white text; the max face (a 6 on d6) is a green box with white text. All rolls.
+- [x] Doubles = any 2 matching dice (any die type) and auto-bank Wear.
+- [x] Rules page: a Combat Rules tab (content from the user's CREW RULES COMBAT doc). Players see it only when the GM setting "Show Combat rules" is on. No other logic changes.
+- [x] Remove "Gear & weapons" from Crew rules.
+- [x] GM Session Notes: a dated list, Session #1 (earliest) … #N (latest). Add, edit any, delete. The old single note was migrated into Session #1.
+
+### Round 4 decisions (tell the user)
+- Green = the die's top face (6 on a d6, 8 on a d8 …), red = 1. On a d6 that's exactly 6 and 1.
+- One roller input: text starting with a formula (`2d6…`) is rolled as a formula; anything else is a label for the stepper dice. A live hint under it says which.
+- Pen widths also set the text size. The GM pen colour is saved per browser.
+- The GM replies privately via the "Reply privately" button or the "Private to X" picker.
+- Combat rules are reference only. The GM's banner on that tab shows/hides it for players.
+
 ## Round 3 request (2026-10-17)
 
 Root cause of the "blank page after lock" bug: not the lock. Seeded sheets

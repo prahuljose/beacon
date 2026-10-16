@@ -230,8 +230,10 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--brass); }
 
 .sheet-head { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
 .portrait-btn { position: relative; padding: 0; border: 0; background: none; }
-.portrait-btn span { position: absolute; inset: auto 0 0 0; font-size: 11px; background: rgba(0,0,0,.65); color: var(--paper); padding: 3px 0; opacity: 0; transition: opacity .15s; border-radius: 0 0 3px 3px; }
-.portrait-btn:hover span, .portrait-btn:focus-visible span { opacity: 1; }
+/* Only the "Change" strip fades in; the avatar itself (also a span) always shows. */
+.portrait-btn .chg { position: absolute; inset: auto 0 0 0; font-size: 11px; text-align: center; background: rgba(0,0,0,.65); color: var(--paper); padding: 3px 0; opacity: 0; transition: opacity .15s; border-radius: 0 0 3px 3px; pointer-events: none; }
+.portrait-btn:hover .chg, .portrait-btn:focus-within .chg { opacity: 1; }
+@media (hover: none) { .portrait-btn .chg { opacity: 1; } }
 .sheet-id { flex: 1; min-width: 220px; display: grid; gap: 8px; }
 .name-input { font-family: var(--slab) !important; font-size: 30px !important; letter-spacing: .04em; padding: 2px 8px !important; }
 .sheet-tools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -727,4 +729,80 @@ fieldset:disabled .stat-name, fieldset:disabled .icon-btn { opacity: .5; cursor:
   .weapon-row { margin-left: 0; }
   .skill-row { grid-template-columns: minmax(0, 1fr) 54px auto; }
   .pill-bar { bottom: 80px; }
+}
+
+
+/* ══ v4: kit, weapons, blackboard, text, widths, private chat, combat ═════ */
+
+.gear-item .gear-row { display: flex; align-items: center; gap: 8px; }
+.gear-item .gear-row .n { width: 20px; flex: none; }
+.gear-item .gear-row .gear-kind { width: 112px; flex: none; }
+.gear-item .gear-row input { flex: 1; min-width: 0; }
+.gear-item .gear-row .roll-btn { flex: none; }
+.gear-item.armor .gear-row input { color: #b9d3e8; }
+.weapon-row .wfield.grow { flex: 1; min-width: 160px; }
+.weapon-row .wfield.grow input { width: 100%; }
+.weapon-row select[data-type="num"] { width: 64px; }
+
+/* Blackboard */
+.draw.board .draw-box { background-color: #141a18;
+  background-image: radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px); background-size: 22px 22px;
+  box-shadow: inset 0 0 40px rgba(0,0,0,.6); }
+
+.widths { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 3px; background: var(--wall); }
+.wbtn { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 2px; background: none; display: inline-flex; align-items: center; justify-content: center; }
+.wbtn i { display: block; border-radius: 50%; background: var(--dim); }
+.wbtn.on { background: rgba(201,162,75,.18); }
+.wbtn.on i { background: var(--brass); }
+.gm-swatch { position: relative; cursor: pointer; overflow: hidden; }
+.gm-swatch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.text-entry {
+  position: absolute; z-index: 3; transform: translateY(-50%); min-width: 140px; width: auto;
+  background: rgba(0,0,0,.55) !important; border: 1px dashed currentColor !important; border-radius: 2px;
+  font-family: var(--type); padding: 2px 6px !important;
+}
+
+/* Dice faces: 1 red, top face green */
+.die.one { background: #c0392b; color: #fff; }
+.die.max { background: #2e8b57; color: #fff; }
+.die.grit { box-shadow: 0 0 0 2px var(--brass); }
+.die.grit:not(.one):not(.max) { background: var(--brass); }
+.die.dbl { box-shadow: 0 0 0 2px #ff7a6b; }
+#mr-hint { margin-top: -2px; }
+#mr-hint b { color: var(--paper); font-weight: 400; }
+
+/* Private chat */
+.chat-msg.private { background: repeating-linear-gradient(135deg, rgba(180,138,214,.08) 0 8px, transparent 8px 16px); border-left: 2px solid #b48ad6; padding: 4px 6px; border-radius: 2px; }
+.chat-form { flex-wrap: wrap; }
+.chat-form select { width: auto; max-width: 170px; }
+.chat-priv { gap: 4px; }
+.chat-priv.on { color: #d6c5f5; border-color: #b48ad6; background: rgba(180,138,214,.18); }
+.chat-reply { padding: 1px 6px; font-size: 11px; }
+
+/* Rules: tabs + combat */
+.hidden-tag { font-size: 10px; color: #f19a8f; border: 1px solid rgba(224,87,74,.6); padding: 0 5px; border-radius: 6px; margin-left: 4px; }
+.rtable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rtable th { font-family: var(--slab); font-weight: 400; font-size: 13px; color: var(--brass); text-align: left; padding: 4px 8px 6px; border-bottom: 2px solid var(--line); }
+.rtable td { padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,.07); vertical-align: top; }
+.tiers { margin: 8px 0 10px; }
+.tiers div { display: grid; grid-template-columns: 54px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.tiers b { font-weight: 400; color: var(--brass); }
+.combat .st { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 26px; }
+.combat .st div { font-size: 13px; line-height: 1.4; color: var(--dim); }
+.combat .st b { display: block; font-weight: 400; font-size: 15px; color: var(--paper); }
+.combat .st i { display: block; font-style: normal; color: var(--brass); }
+
+/* GM session notes */
+.sessions { display: grid; gap: 12px; max-height: 560px; overflow-y: auto; padding-right: 4px; }
+.session-note { border: 1px solid var(--line); border-radius: 3px; padding: 8px 10px 10px; background: rgba(0,0,0,.15); }
+.session-note .row { margin-bottom: 6px; }
+.session-num { font-family: var(--slab); font-weight: 400; color: var(--brass); }
+.session-note input[type=date] { width: auto; padding: 3px 6px; color-scheme: dark; }
+.session-note textarea { min-height: 90px; }
+
+@media (max-width: 900px) { .combat .st { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .combat .st { grid-template-columns: 1fr; }
+  .gear-item .gear-row .gear-kind { width: 92px; }
+  .chat-form select { max-width: 100%; flex-basis: 100%; }
 }
