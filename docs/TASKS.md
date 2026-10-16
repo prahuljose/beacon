@@ -20,6 +20,58 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 3 request (2026-10-17)
+
+Root cause of the "blank page after lock" bug: not the lock. Seeded sheets
+had no `gear` array in the DB, and typing into gear slot 1 patched
+`gear.0`. `patch_sheet` created the missing parent as an *object*, so NONO
+got `{"0":"sss"}` and the client crashed on `gear.map`. Fix: the client always
+saves `gear`/`custom` as whole arrays, `normalize()` repairs objects into
+arrays, and NONO's data was repaired in the DB.
+
+### Progress
+- [x] DB migration v3 (supabase/v3.sql, applied and API-tested on throwaway characters)
+- [x] Front end v3 (app.js rewrite + styles)
+- [x] Tested locally as GM and player (throwaway ZZ Test), then cleaned up
+- [x] Deployed (`?v=3`)
+
+### Items
+- [x] Remove Quick Rules from the Crew page. Rules live only on the Rules page.
+- [x] Chat goes where Quick Rules was (simple: name, message, time; everyone).
+- [x] Players can add and remove Grit (+/−, pips).
+- [x] Dice log: show modifiers inline in grey next to the dice, AND the breakdown.
+- [x] Breakdown shows every part, even +0 (e.g. "History skill +0").
+- [x] GM setting (global): a Wear reroll also rerolls the Grit die.
+- [x] Doubles auto-bank 1 Wear. At max, the log says "already at max Wear".
+- [x] Bug: profile picture couldn't be added or changed. Check and fix.
+- [x] Skills: remove the skill-only roll. Only stat, or stat + skill.
+- [x] Remove the lock feature completely (UI + server). Unlock all sheets.
+- [x] Sheet order: HP, Dropping, Wear above Stats & Skills.
+- [x] Remove the "Last roll / reroll" strip from the sheet.
+- [x] Dice animation when rerolled or a Grit die is added (and on fresh rolls).
+- [x] Dice log avatar 2× bigger.
+- [x] Gear: each slot is an item or a weapon. A weapon has damage (N d6) + stat + permanent bonus (default 0). Roll damage from the sheet.
+- [x] Login screen: bigger character icons.
+- [x] Vault DANGER: GM marks boxes. Hidden from players until the box is Open / In progress / Complete, then shown in a special style.
+- [x] Scenes: several can be active at once. Each opens its own floating window for players (drag, minimise). The GM clearly sees which are live.
+- [x] Image scenes: pen in your profile colour, eraser, ping (fades after ~1 s, in your colour). Realtime for everyone. GM can clear all markings.
+- [x] Drawing Board: a special shared blank canvas, always on the Crew page, with the same pen/erase/ping.
+- [x] Player tab order: Crew, Rules, then their sheet (others after).
+- [x] GM can permanently delete a character from Deleted characters.
+- [x] Rolls can be public or private (GM-only). Clear marker for the GM. The GM can roll privately (GM-only).
+- [x] GM can raise an individual player's Wear max (default 3).
+- [x] Dice formula supports skills: `2d6+wits+perception`.
+- [x] GM page: two notes, "GM Session Notes" and "GM Notes".
+- [x] Rules page: GM-editable free text at the bottom. Read-only for players.
+
+### Round 3 decisions (tell the user)
+- Players can view other sheets read-only (unchanged). Anyone can now use Grit +/−, the pips and "+1 Grit" on cards.
+- Doubles auto-bank on any 2d6 sheet roll (including HP and damage), and again if a Wear reroll lands doubles.
+- The eraser removes whole strokes, anyone's. Pings and in-progress strokes go over Realtime broadcast only; saved strokes go to the DB.
+- DANGER shows to players once a box is Open, In progress or Complete.
+- A private roll from a player is seen by that player and the GM. A GM private roll is GM-only. Grit can't be added to rolls you can't see.
+- The GM's pen colour is cream (#f1e7c9). Players draw in their sheet colour.
+
 ## Round 2 request (2026-10-17)
 
 ### Progress

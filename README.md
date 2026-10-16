@@ -14,40 +14,44 @@ sheets, a shared dice log, the Grit pool, Wear rerolls, scenes and the Vault.
 
 ## What's in it
 
-- **Crew board.** The Grit pool (session roll, spend from any d6 roll) and a
-  card per character.
+- **Crew board.**
+  - Shared Grit pool: anyone can add, remove or spend Grit. The session roll is once per session, and the GM reopens it.
+  - Chat.
+  - A card per character.
+  - The shared **Drawing Board**.
 - **Sheets.** Bio & Info and Attributes & Abilities tabs.
-  - Skills follow the fixed stat matrix. Each one rolls on its own
-    (2d6 + skill) or with its stat (2d6 + stat + skill).
-  - Temp HP is used up before regular HP.
-  - The roll bar shows your Specialty and your last roll, with a Wear reroll
-    button next to it.
-- **Customizing.** Each sheet has its own colour and portrait. You can hide
-  panels and add your own sections and fields.
-- **Dice log.** Every roll shows how its total was reached: each die, every
-  modifier and where it came from, a Grit die and who added it, and the old
-  dice from a Wear reroll.
-  - Doubles offer +1 Wear.
-  - A manual roller lets you pick the number of dice, the die type and a
-    modifier.
-- **Scenes (GM).** Upload a map or picture and show it. Players see it in a
-  floating window they can drag, minimise or open full screen.
-- **The Vault.** A built-in scene with 100 boxes (A1–Y4). Any player can mark
-  a box Open, In progress or Complete while the Vault is shown.
+  - HP (with temp HP), Dropping and Wear sit above Stats & Skills.
+  - Skills follow the fixed stat matrix and always roll with their stat.
+  - Gear slots are items or weapons. A weapon rolls N d6 + a stat + a permanent bonus.
+- **Customizing.** Each sheet has its own colour and portrait. You can hide panels and add your own sections and fields.
+- **Dice log.**
+  - Rolls are public, or private (only the roller and the GM; the GM's private rolls are GM-only).
+  - Each roll shows its modifiers next to the dice and a full breakdown underneath.
+  - Doubles bank Wear automatically, and Wear rerolls any of your rolls. A GM setting makes rerolls include the Grit die.
+  - Dice animate when rolled or rerolled.
+  - A manual roller, plus formulas like `2d6+wits+perception`.
+- **Scenes (GM).** Upload maps or pictures. Several can be live at once, each in its own floating window for everyone.
+  - Everyone can draw in their colour, erase and ping. The GM can clear a scene.
+- **The Vault.** A built-in scene with 100 boxes (A1–Y4).
+  - Players mark boxes Open, In progress or Complete.
+  - The GM can secretly mark DANGER boxes, which show to players once opened.
+- **GM page.** Logins and passwords, Wear max per character, settings, Session Notes and GM Notes, the session roll, clearing the log, and restoring or permanently deleting characters.
+- **Rules page.** The crew rules, plus a note at the bottom that only the GM can edit.
 
-Changes reach everyone within about a second (a Supabase Realtime ping), with
-2.5 s polling as a backup.
+Changes reach everyone within about a second (Supabase Realtime), with 2.5 s
+polling as a backup.
 
 ## How it works
 
 - Static `index.html` + `styles.css` + `app.js`. No build step. Vercel serves
   the repo as-is on every push to `main`.
 - Data lives in the Supabase project **beacon** (RJ org, ap-south-1).
-  `supabase/schema.sql` is the full schema.
+  The schema is `supabase/schema.sql` (v2) plus `supabase/v3.sql` on top.
 - The browser only holds the public Supabase key and a session token. Tables
   are closed to that key. Every call goes through a database function that
   checks the session and the role first.
-- `docs/TASKS.md` is the running task list.
+- `docs/TASKS.md` is the running task list. Bump the `?v=` asset version in
+  `index.html` on every front-end change (Cloudflare caches assets for 4 hours).
 
 ## Local preview
 

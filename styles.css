@@ -607,3 +607,124 @@ fieldset:disabled .stat-name, fieldset:disabled .icon-btn { opacity: .5; cursor:
   .v-title { font-size: 13px; }
   .vault-wrap { padding: 8px 4px; }
 }
+
+/* ══ v3: chat, drawing, multi-scene windows, danger, private rolls ═════════ */
+
+.avatar.xl { width: 96px; height: 96px; font-size: 40px; border-width: 2.5px; }
+.who-grid { grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: 12px; }
+.who-tile { padding: 18px 10px 14px; gap: 10px; }
+.who-tile.gm .avatar { font-size: 28px; }
+.gate .gate-box { width: min(680px, 100%); }
+.avatar.md { width: 56px; height: 56px; font-size: 24px; border-width: 2px; }
+
+.nav a.mine { border-color: rgba(201,162,75,.35); }
+.live-count { font-size: 10px; color: #e0574a; border: 1px solid rgba(224,87,74,.6); padding: 0 5px; border-radius: 6px; margin-left: 3px; font-family: var(--type); }
+
+/* Portrait picker is a label around a real file input (works on phones too). */
+.portrait-btn { cursor: pointer; display: inline-block; }
+.portrait-btn.ro { cursor: default; }
+.portrait-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+
+/* Gear & weapons */
+.gear-item { border-bottom: 1px dashed var(--line); padding: 6px 0; }
+.gear-item:last-of-type { border-bottom: 0; }
+.gear-item .gear-row { grid-template-columns: 22px 104px minmax(0, 1fr) 30px; margin: 0; }
+.gear-item.weapon .gear-row input { color: #f0c9a0; }
+.weapon-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0 2px 30px; }
+.wfield { display: flex; flex-direction: column; gap: 2px; }
+.wfield > span { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+.wfield input[type=number] { width: 64px; text-align: center; }
+.wfield select { width: auto; }
+
+/* Skill rows: one button (stat + skill) */
+.skill-row { grid-template-columns: minmax(0, 1fr) 60px auto; }
+.gm-step { font-family: var(--type); font-size: 12px; }
+.gm-step b { min-width: 64px; }
+
+/* Chat */
+.chat-panel { display: flex; flex-direction: column; min-height: 320px; }
+.chat-list { flex: 1; min-height: 180px; max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 8px; }
+.chat-msg { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; }
+.chat-msg b { font-weight: 400; }
+.chat-time { font-size: 11px; color: var(--faint); }
+.chat-body { color: var(--paper); line-height: 1.4; word-wrap: break-word; overflow-wrap: anywhere; white-space: pre-wrap; }
+.chat-form { display: flex; gap: 8px; margin-top: 8px; }
+.chat-form input { flex: 1; }
+
+/* Drawing (image scenes and the board) */
+.draw { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+.draw-tools { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--steel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.draw.board .draw-tools { border: 1px solid var(--line); border-radius: 3px 3px 0 0; }
+.tool { padding: 4px 9px; font-size: 12.5px; border: 1px solid var(--line); border-radius: 3px; background: var(--wall); color: var(--dim); }
+.tool.on { color: var(--brass); border-color: var(--brass); background: rgba(201,162,75,.12); }
+.swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--paper); }
+.draw-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.draw.board .draw-stage { display: block; }
+.draw-box { position: relative; touch-action: none; user-select: none; -webkit-user-select: none; }
+.draw.board .draw-box { background: #f2ecdc; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 3px 3px;
+  background-image: radial-gradient(rgba(0,0,0,.08) 1px, transparent 1px); background-size: 22px 22px; }
+.draw-img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.draw-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.draw-box[data-tool="pen"] { cursor: crosshair; }
+.draw-box[data-tool="erase"] { cursor: cell; }
+.draw-box[data-tool="ping"] { cursor: pointer; }
+.pings { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.loc-ping { position: absolute; width: 0; height: 0; }
+.loc-ping i { position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; border-radius: 50%; border: 3px solid var(--c); animation: ring 1.2s ease-out forwards; }
+.loc-ping i + i { animation-delay: .2s; }
+.loc-ping span { position: absolute; left: 14px; top: -24px; font-size: 11px; color: #fff; background: var(--c); color: #111; padding: 0 5px; border-radius: 6px; white-space: nowrap; animation: fade 1.2s ease-out forwards; }
+@keyframes ring { from { transform: scale(.3); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+@keyframes fade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Multi-scene windows */
+.scene-win.min { display: none; }
+.scene-body { display: flex; }
+.scene-body > .draw { flex: 1; }
+.pill-bar { position: fixed; left: 16px; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 36; display: flex; gap: 8px; flex-wrap: wrap; max-width: calc(100vw - 110px); }
+.pill-bar .scene-pill { position: static; }
+.scene-card { position: relative; }
+.live-ribbon { position: absolute; top: 10px; left: 10px; z-index: 2; display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 10px; background: rgba(0,0,0,.75); color: #f19a8f; font-size: 11.5px; letter-spacing: .08em; border: 1px solid rgba(224,87,74,.7); }
+
+/* Vault danger */
+.v-box { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 1px; }
+.v-box svg { width: 9px; height: 9px; flex: none; }
+.v-box.danger { background: repeating-linear-gradient(45deg, rgba(184,70,58,.55) 0 4px, rgba(80,20,16,.7) 4px 8px) !important;
+  border-color: #ff5a47 !important; color: #fff !important; box-shadow: 0 0 0 1px #ff5a47, 0 0 10px rgba(255,90,71,.45); }
+.v-box.danger-hidden { outline: 1px dashed #ff5a47; outline-offset: -3px; color: #ff8a7a; }
+.v-legend .danger-key { background: repeating-linear-gradient(45deg, rgba(184,70,58,.8) 0 3px, rgba(80,20,16,.9) 3px 6px); border-color: #ff5a47; }
+.v-menu .btn.danger { margin-top: 4px; }
+
+/* Dice log v3 */
+.mod-inline { color: var(--dim); font-size: 13px; margin-left: 2px; }
+.bd-row.zero { opacity: .65; }
+.entry.is-private { border-style: dashed; background: repeating-linear-gradient(135deg, var(--steel) 0 10px, #252e33 10px 20px); }
+.tag.private { color: #c9b6f0; border-color: rgba(180,138,214,.6); display: inline-flex; align-items: center; gap: 4px; }
+.vis-toggle { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.vis-toggle button { background: var(--wall); border: 0; padding: 6px 8px; font-size: 12.5px; color: var(--dim); display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.vis-toggle button + button { border-left: 1px solid var(--line); }
+.vis-toggle button.on { background: rgba(201,162,75,.16); color: var(--brass); }
+.vis-toggle button.on:last-child { background: rgba(180,138,214,.18); color: #d6c5f5; }
+.die.tumble { animation: tumble .6s cubic-bezier(.3,1.4,.5,1) both; animation-delay: calc(var(--i, 0) * 70ms); }
+@keyframes tumble {
+  0% { transform: translateY(-10px) rotate(-200deg) scale(.6); opacity: 0; }
+  60% { transform: translateY(2px) rotate(15deg) scale(1.08); opacity: 1; }
+  100% { transform: none; }
+}
+
+/* Rules: GM note */
+.rules-note { white-space: pre-wrap; line-height: 1.55; }
+.setting { gap: 10px; align-items: flex-start; }
+.setting span { font-size: 13.5px; line-height: 1.4; }
+
+/* GM rows without the lock column */
+.gm-row { grid-template-columns: 30px minmax(90px, 1fr) auto minmax(220px, 1.5fr) auto; }
+
+@media (max-width: 640px) {
+  .avatar.xl { width: 72px; height: 72px; font-size: 30px; }
+  .who-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .avatar.md { width: 44px; height: 44px; font-size: 19px; }
+  .gear-item .gear-row { grid-template-columns: 18px 86px minmax(0, 1fr) 28px; }
+  .weapon-row { margin-left: 0; }
+  .skill-row { grid-template-columns: minmax(0, 1fr) 54px auto; }
+  .pill-bar { bottom: 80px; }
+}
