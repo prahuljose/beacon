@@ -1,7 +1,0 @@
-{
-  "name": "beacon",
-  "version": "0.1.0",
-  "description": "Solar dashboard — beacon.dpdns.org",
-  "private": true,
-  "engines": { "node": ">=18" }
-}
