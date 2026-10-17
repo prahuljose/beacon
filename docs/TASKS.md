@@ -20,6 +20,14 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 9 request (2026-10-18)
+- [x] Drawing Board full screen: a "⤢ Full screen" button in its toolbar (Esc or the button exits). Same 16:7 shape, so existing drawings stay in place, just bigger.
+- [x] Text entry no longer jumps or scrolls: it was an input caught by the global `input { width: 100% }` rule, so it overflowed off the board and focus scrolled the page. Now a textarea sized to its text, clamped inside the board, focused with preventScroll.
+- [x] Shift+Enter adds a new line; Enter saves; Esc cancels. Multi-line labels draw, move (select tool) and erase as one block. Short "Type here" placeholder plus a small hint under the box.
+- [x] Fixed while testing: the full-screen board overflowed on the right (`.draw { width: 100% }` beat the insets).
+- [x] Note: during testing the board was "Clear all"-ed by a GM session on the live site (not the test), which removed HOHO's "asd" and a GM pen stroke.
+- [x] Deployed `?v=10`.
+
 ## Round 8 request (2026-10-18)
 - [x] In-game Day and Time in the top bar (next to DEBT), visible to everyone at all times. Only the GM can change it: click the clock for Day −/+, time −1h/−15m/+15m/+1h, a time box, and presets (Dawn, Morning, Noon, Dusk, Night, Midnight). Going past midnight moves to the next day. The style changes with the time (sun by day, horizon at dawn/dusk, moon and blue tint at night) and pulses when it changes.
 - [x] Stored as `crew.settings.clock = { day, minutes }` and saved via gm_set_settings (GM-only), so no DB migration was needed.

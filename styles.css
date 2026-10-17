@@ -1064,3 +1064,29 @@ button.clock:hover { border-color: var(--brass); }
   .clock-icon { width: 15px; height: 15px; }
   .clock-pop { position: fixed; left: 12px; right: 12px; top: 96px; width: auto; }
 }
+
+
+/* ══ v9: board full screen, multi-line text entry ═════════════════════════ */
+
+.tool-max { margin-left: 4px; }
+body.board-max { overflow: hidden; }
+.draw.board.maximized {
+  position: fixed; inset: 14px; width: auto; height: auto; z-index: 70; display: flex; flex-direction: column;   /* width:auto so the insets win over .draw's 100% */
+  background: #0d1214; border: 1px solid var(--brass); border-radius: 6px;
+  box-shadow: 0 0 0 100vmax rgba(5,8,10,.78), 0 20px 60px rgba(0,0,0,.7);
+}
+.draw.board.maximized .draw-tools { border: 0; border-bottom: 1px solid var(--line); border-radius: 6px 6px 0 0; }
+.draw.board.maximized .draw-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 10px; }
+.draw.board.maximized .draw-box { border: 1px solid var(--line); border-radius: 3px; }
+
+textarea.text-entry {
+  position: absolute; z-index: 3; transform: none; min-width: 0; min-height: 0; resize: none; overflow: hidden;
+  white-space: pre; box-sizing: border-box; margin: 0;
+  background: rgba(0,0,0,.6) !important; border: 1px dashed currentColor !important; border-radius: 3px;
+  font-family: "Special Elite", "Courier New", monospace; box-shadow: 0 6px 18px rgba(0,0,0,.45);
+}
+textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
+
+.text-hint { position: absolute; z-index: 3; pointer-events: none; white-space: nowrap; font-size: 11px; color: var(--paper);
+  background: rgba(0,0,0,.75); border: 1px solid var(--line); border-radius: 3px; padding: 2px 7px; }
+@media (max-width: 640px) { .draw.board.maximized { inset: 6px; } }

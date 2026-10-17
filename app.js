@@ -1938,38 +1938,96 @@ function toolsHTML(sc) {
            : `<span class="swatch" style="background:${esc(myColor())}" title="Your colour"></span>`}
       <span class="spacer"></span>
       ${gm ? `<button class="btn sm ghost" data-clear="${sc.id}">Clear all</button>` : ''}
+      ${sc.kind === 'board' ? '<button class="tool tool-max" data-max title="Full screen (Esc to close)" aria-label="Full screen">⤢ Full screen</button>' : ''}
     </div>`;
 }
+
+// The Drawing Board can take over the screen while you draw. Same aspect
+// ratio, so everyone's drawings stay where they were put.
+function toggleMax(c, on = !c.el.classList.contains('maximized')) {
+  c.el.classList.toggle('maximized', on);
+  document.body.classList.toggle('board-max', on);
+  const b = c.el.querySelector('[data-max]');
+  if (b) { b.innerHTML = on ? '⤡ Exit full screen' : '⤢ Full screen'; b.title = on ? 'Exit full screen (Esc)' : 'Full screen (Esc to close)'; }
+  requestAnimationFrame(() => layout(c));
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || e.target.closest && e.target.closest('.text-entry')) return;
+  for (const c of canvases.values()) if (c.el.classList.contains('maximized')) toggleMax(c, false);
+});
 
 // Text size on the scene, in CSS px for a box `boxW` wide.
 const textPx = (w, boxW) => (12 + w * 2.2) * (boxW / 900);
 
+// Text labels can span lines; the first line is centred on the click point.
+const LINE_H = 1.25;
+const measureCtx = document.createElement('canvas').getContext('2d');
+const textFont = fs => `${fs}px "Special Elite", "Courier New", monospace`;
+function textLines(t) { return String(t || '').split('\n'); }
+// The box a label covers, in CSS px of a drawing box rw × rh wide.
+function textBox(s, rw, rh) {
+  const fs = textPx(s.width, rw), lh = fs * LINE_H, ls = textLines(s.text);
+  measureCtx.font = textFont(fs);
+  const w = Math.max(...ls.map(l => measureCtx.measureText(l).width));
+  const x0 = s.points[0] * rw, y0 = s.points[1] * rh - lh / 2;
+  return { x0, y0, w, h: ls.length * lh };
+}
+
 function openTextInput(c, x, y) {
-  c.box.querySelectorAll('.text-entry').forEach(n => n.remove());
-  const inp = document.createElement('input');
-  inp.className = 'text-entry';
-  inp.maxLength = 300;
-  inp.placeholder = 'Type, then Enter';
-  inp.style.left = (x * 100) + '%'; inp.style.top = (y * 100) + '%';
-  inp.style.color = myColor();
-  inp.style.fontSize = Math.max(11, textPx(S.textSize, c.box.clientWidth)) + 'px';
-  c.box.appendChild(inp);
-  setTimeout(() => inp.focus(), 0);
+  c.box.querySelectorAll('.text-entry, .text-hint').forEach(n => n.remove());
+  const bw = c.box.clientWidth, bh = c.box.clientHeight;
+  const fs = Math.max(11, textPx(S.textSize, bw)), lh = fs * LINE_H, PAD = 4;
+  const left = x * bw, maxW = Math.max(90, bw - left - 4);
+  const ta = document.createElement('textarea');
+  ta.className = 'text-entry';
+  ta.maxLength = 300;
+  ta.rows = 1;
+  ta.wrap = 'off';
+  ta.spellcheck = false;
+  ta.placeholder = 'Type here';
+  const hint = document.createElement('div');
+  hint.className = 'text-hint';
+  hint.textContent = 'Enter to save · Shift+Enter for a new line · Esc to cancel';
+  Object.assign(ta.style, {
+    left: left + 'px', top: Math.max(0, y * bh - lh / 2 - PAD - 1) + 'px',
+    color: myColor(), fontSize: fs + 'px', lineHeight: lh + 'px', padding: PAD + 'px ' + (PAD + 2) + 'px',
+  });
+  const fit = () => {
+    const ls = textLines(ta.value || ta.placeholder);
+    measureCtx.font = textFont(fs);
+    const w = Math.max(...ls.map(l => measureCtx.measureText(l).width));
+    ta.style.width = Math.max(80, Math.min(maxW, w + 2 * PAD + 10)) + 'px';
+    ta.style.height = (textLines(ta.value || ' ').length * lh + 2 * PAD + 2) + 'px';
+    // The hint sits under the box, or above it near the bottom edge.
+    const top = parseFloat(ta.style.top), h = parseFloat(ta.style.height);
+    hint.style.left = ta.style.left;
+    hint.style.top = (top + h + 22 > bh ? Math.max(0, top - 22) : top + h + 4) + 'px';
+  };
+  fit();
+  c.box.appendChild(ta);
+  c.box.appendChild(hint);
+  // No page jump: focus without scrolling.
+  setTimeout(() => ta.focus({ preventScroll: true }), 0);
   let done = false;
   const finish = async save => {
     if (done) return;
     done = true;
-    const text = inp.value.trim();
-    inp.remove();
-    if (!save || !text) return;
+    const text = ta.value.replace(/\s+$/, '').replace(/^\n+/, '');
+    ta.remove(); hint.remove();
+    if (!save || !text.trim()) return;
     try {
       const st = await api('add_stroke', { p_scene: c.id, p_color: myColor(), p_width: S.textSize, p_points: [x, y], p_text: text });
       applyStroke(st); redraw(c); ping();
     } catch (err) { fail(err); }
   };
-  inp.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') finish(true); else if (ev.key === 'Escape') finish(false); });
-  inp.addEventListener('blur', () => finish(true));
-  inp.addEventListener('pointerdown', ev => ev.stopPropagation());
+  ta.addEventListener('input', fit);
+  ta.addEventListener('keydown', ev => {
+    ev.stopPropagation();
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); finish(true); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+  });
+  ta.addEventListener('blur', () => finish(true));
+  ta.addEventListener('pointerdown', ev => ev.stopPropagation());
 }
 
 function makeCanvas(sc) {
@@ -1996,6 +2054,7 @@ function makeCanvas(sc) {
       document.querySelectorAll('.tsbtn').forEach(b => { const on = +b.dataset.tsize === S.textSize; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
       return;
     }
+    if (e.target.closest('[data-max]')) { toggleMax(c); return; }
     const wb = e.target.closest('[data-width]');
     if (wb) {
       S.penWidth = +wb.dataset.width; lsSet('debt.pen', String(S.penWidth));
@@ -2102,7 +2161,8 @@ function layout(c) {
   const W = c.stage.clientWidth, H = c.stage.clientHeight;
   if (!W) return;
   let w = W, h = W / c.aspect;
-  if (c.kind === 'image' && H && h > H) { h = H; w = H * c.aspect; }
+  const fitHeight = c.kind === 'image' || c.el.classList.contains('maximized');
+  if (fitHeight && H && h > H) { h = H; w = H * c.aspect; }
   c.box.style.width = Math.round(w) + 'px';
   c.box.style.height = Math.round(h) + 'px';
   const dpr = window.devicePixelRatio || 1;
@@ -2124,10 +2184,11 @@ function redraw(c) {
   const scale = W / 900;
   const draw = s => {
     if (s.text) {
+      const fs = Math.round((12 + s.width * 2.2) * scale);
       ctx.fillStyle = s.color;
-      ctx.font = `${Math.round((12 + s.width * 2.2) * scale)}px "Special Elite", "Courier New", monospace`;
+      ctx.font = textFont(fs);
       ctx.textBaseline = 'middle';
-      ctx.fillText(s.text, s.points[0] * W, s.points[1] * H);
+      textLines(s.text).forEach((ln, i) => ctx.fillText(ln, s.points[0] * W, s.points[1] * H + i * fs * LINE_H));
       return;
     }
     ctx.strokeStyle = s.color; ctx.lineWidth = Math.max(1.5, s.width * scale); strokePath(ctx, s.points, W, H); ctx.stroke();
@@ -2141,14 +2202,11 @@ function redrawScene(id) { const c = canvases.get(id); if (c) redraw(c); }
 // Select tool: the topmost text label under the pointer.
 function hitText(c, e) {
   const r = c.box.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
-  const ctx = c.canvas.getContext('2d');
   let hit = null;
   for (const s of (S.strokes.get(c.id) || new Map()).values()) {
     if (!s.text) continue;
-    const fs = textPx(s.width, r.width);
-    ctx.font = `${fs}px "Special Elite", "Courier New", monospace`;
-    const tw = ctx.measureText(s.text).width, x0 = s.points[0] * r.width, yc = s.points[1] * r.height;
-    if (px > x0 - 8 && px < x0 + tw + 8 && Math.abs(py - yc) < fs / 2 + 8) hit = s;
+    const b = textBox(s, r.width, r.height);
+    if (px > b.x0 - 8 && px < b.x0 + b.w + 8 && py > b.y0 - 8 && py < b.y0 + b.h + 8) hit = s;
   }
   return hit;
 }
@@ -2162,8 +2220,8 @@ function eraseAt(c, e) {
   for (const [id, s] of m) {
     const p = s.points;
     if (s.text) {
-      const fs = textPx(s.width, r.width), x0 = p[0] * r.width, yc = p[1] * r.height;
-      if (px > x0 - R && px < x0 + s.text.length * fs * 0.62 + R && Math.abs(py - yc) < fs / 2 + R) { c.erase.add(id); m.delete(id); hit = true; }
+      const b = textBox(s, r.width, r.height);
+      if (px > b.x0 - R && px < b.x0 + b.w + R && py > b.y0 - R && py < b.y0 + b.h + R) { c.erase.add(id); m.delete(id); hit = true; }
       continue;
     }
     for (let i = 0; i < p.length - 2; i += 2) {
