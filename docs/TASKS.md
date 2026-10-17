@@ -20,6 +20,11 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 7 request (2026-10-17)
+- [x] Login page redesign, on brand: big DEBT wordmark, a featured brass "Game Master" card (seal, sheen, Sign in button), ID-card tiles with large portraits and name plates (accent strip, tick when picked, greyed "No password yet"), a password panel that opens under whatever was picked, and a shake on a wrong password.
+- [x] Fixed while checking it by eye: the old `#login-pass` rule (360px, full-width button) squeezed the panel; the entrance animation's `both` fill blocked hover lifts (now `backwards`).
+- [x] Checked on desktop 1280 and phone 375 (no sideways scroll). Wrong and right password both tested. Deployed `?v=7`.
+
 ## Round 6 request (2026-10-17)
 - [x] Minimised Turn Order pill shows the round, the current person (portrait and colour) and who's next. It pulses when the turn changes.
 - [x] Vault redesign: one brass frame and "VAULT" title around all three blocks, which now look identical (the brass middle block made only K–O look like the vault).

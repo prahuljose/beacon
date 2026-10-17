@@ -618,62 +618,101 @@ async function afterReroll(before, after) {
 
 const app = $('#app');
 
+const KEY_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3"/><path d="m16 7 3 3"/><path d="m14 9 2 2"/></svg>';
+const LOCK_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+
 async function renderLogin(msg) {
   clearInterval(pollTimer);
-  app.innerHTML = `<div class="gate"><div class="gate-box"><div class="logo-die"><i></i><i></i><i></i></div><h1>DEBT</h1><p class="dim">Loading the crew…</p></div></div>`;
+  app.innerHTML = `<div class="login"><div class="login-inner"><header class="login-brand"><div class="logo-die"><i></i><i></i><i></i></div><h1>DEBT</h1><p>Loading the crew…</p></header></div></div>`;
   let options = [];
   try { options = await rpc('login_options'); }
-  catch { app.querySelector('.gate-box p').textContent = 'Couldn’t reach the server. Refresh to try again.'; return; }
+  catch { app.querySelector('.login-brand p').textContent = 'Couldn’t reach the server. Refresh to try again.'; return; }
 
-  const tiles = options.map((o, i) => `
-    <button type="button" class="who-tile" data-pick="${o.id}" style="--accent:${esc(o.accent || PALETTE[i % PALETTE.length])}" aria-pressed="false">
-      <span class="avatar xl" style="${o.portrait ? `background-image:url('${esc(o.portrait)}')` : ''}">${o.portrait ? '' : esc((o.name || '?').charAt(0).toUpperCase())}</span>
-      <span class="who-name">${esc(o.name || 'Unnamed')}</span>
-      ${o.ready ? '' : '<span class="who-note">No password yet</span>'}
-    </button>`).join('');
+  const tiles = options.map((o, i) => {
+    const accent = o.accent || PALETTE[i % PALETTE.length];
+    return `
+      <button type="button" class="crew-tile ${o.ready ? '' : 'locked'}" data-pick="${o.id}" style="--accent:${esc(accent)};--d:${i * 50}ms" aria-pressed="false">
+        <span class="ct-photo" style="${o.portrait ? `background-image:url('${esc(o.portrait)}')` : ''}">${o.portrait ? '' : `<b>${esc((o.name || '?').charAt(0).toUpperCase())}</b>`}</span>
+        <span class="ct-plate">
+          <b class="ct-name">${esc(o.name || 'Unnamed')}</b>
+          <small>${o.ready ? 'Ready' : `${LOCK_SM} No password yet`}</small>
+        </span>
+      </button>`;
+  }).join('');
 
   app.innerHTML = `
-    <div class="gate">
-      <form class="gate-box" id="login-form" autocomplete="on">
-        <div class="logo-die"><i></i><i></i><i></i></div>
-        <h1>DEBT</h1>
-        <p class="dim">Who are you playing?</p>
-        <div class="who-grid">
-          ${tiles}
-          <button type="button" class="who-tile gm" data-pick="gm" aria-pressed="false">
-            <span class="avatar xl">GM</span><span class="who-name">Game Master</span>
-          </button>
-        </div>
-        <div id="login-pass" hidden>
-          <div class="field stack">
+    <div class="login">
+      <div class="login-inner">
+        <header class="login-brand">
+          <div class="logo-die"><i></i><i></i><i></i></div>
+          <h1>DEBT</h1>
+          <p>Crew portal</p>
+        </header>
+
+        <button type="button" class="gm-card" data-pick="gm" aria-pressed="false">
+          <span class="gm-seal">${KEY_SVG}</span>
+          <span class="gm-copy">
+            <small>Running the table?</small>
+            <b>Game Master</b>
+            <span>Scenes, rolls, the Vault and every sheet.</span>
+          </span>
+          <span class="gm-go">Sign in <i>→</i></span>
+        </button>
+
+        <div class="login-divider"><span>or play as</span></div>
+
+        <div class="crew-grid">${tiles || '<p class="dim small">No characters yet. The GM adds them.</p>'}</div>
+
+        <form class="unlock" id="login-pass" autocomplete="on" hidden>
+          <span class="unlock-who" id="unlock-who"></span>
+          <div class="unlock-field">
             <label for="pass" id="pass-label">Password</label>
-            <input id="pass" type="password" autocomplete="current-password">
+            <div class="unlock-row">
+              <input id="pass" type="password" autocomplete="current-password" placeholder="••••••">
+              <button class="btn brass" type="submit" id="login-btn">Enter</button>
+            </div>
           </div>
-          <button class="btn brass" type="submit" id="login-btn">Enter</button>
-        </div>
-        <p class="err" id="login-err">${esc(msg || '')}</p>
-      </form>
+          <button type="button" class="icon-btn unlock-x" id="unlock-x" aria-label="Pick someone else">×</button>
+        </form>
+        <p class="err login-err" id="login-err" role="alert">${esc(msg || '')}</p>
+      </div>
     </div>`;
 
   let picked = null;
+  const unlock = $('#login-pass');
+  const close = () => {
+    picked = null; unlock.hidden = true; unlock.classList.remove('gm');
+    app.querySelectorAll('[data-pick]').forEach(x => x.setAttribute('aria-pressed', 'false'));
+  };
   app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
-    picked = b.dataset.pick;
+    const id = b.dataset.pick, o = options.find(x => x.id === id), err = $('#login-err');
     app.querySelectorAll('[data-pick]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    const o = options.find(x => x.id === picked);
-    const err = $('#login-err');
     if (o && !o.ready) {
-      $('#login-pass').hidden = true;
+      close();
+      b.setAttribute('aria-pressed', 'true');
       err.textContent = `${o.name} has no password yet. Ask the GM to set one.`;
       return;
     }
+    picked = id;
     err.textContent = '';
-    $('#login-pass').hidden = false;
-    $('#pass-label').textContent = picked === 'gm' ? 'GM password' : `Password for ${o.name}`;
+    const gm = id === 'gm';
+    const accent = gm ? 'var(--brass)' : b.style.getPropertyValue('--accent');
+    unlock.style.setProperty('--accent', accent);
+    unlock.classList.toggle('gm', gm);
+    $('#unlock-who').innerHTML = gm
+      ? `<span class="uw-photo gm">${KEY_SVG}</span><span><small>Signing in as</small><b>Game Master</b></span>`
+      : `<span class="uw-photo" style="${b.querySelector('.ct-photo').getAttribute('style')}">${b.querySelector('.ct-photo').innerHTML}</span><span><small>Signing in as</small><b>${esc(o.name)}</b></span>`;
+    $('#pass-label').textContent = gm ? 'GM password' : `${o.name}’s password`;
+    // Open the password box right under what was picked (the GM card, or the crew grid).
+    (gm ? $('.gm-card') : $('.crew-grid')).after(unlock, $('#login-err'));
+    unlock.hidden = false;
     $('#pass').value = '';
-    $('#pass').focus();
+    unlock.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    $('#pass').focus({ preventScroll: true });
   });
+  $('#unlock-x').onclick = close;
 
-  $('#login-form').onsubmit = async e => {
+  unlock.onsubmit = async e => {
     e.preventDefault();
     if (!picked) return;
     const btn = $('#login-btn');
@@ -685,7 +724,9 @@ async function renderLogin(msg) {
       boot();
     } catch (err) {
       $('#login-err').textContent = err.message === 'bad_login' ? 'That’s not the password.' : 'Couldn’t reach the server. Try again.';
+      unlock.classList.remove('shake'); void unlock.offsetWidth; unlock.classList.add('shake');
       btn.disabled = false; btn.textContent = 'Enter';
+      $('#pass').select();
     }
   };
 }
