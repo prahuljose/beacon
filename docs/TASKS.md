@@ -20,6 +20,11 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 6 request (2026-10-17)
+- [x] Minimised Turn Order pill shows the round, the current person (portrait and colour) and who's next. It pulses when the turn changes.
+- [x] Vault redesign: one brass frame and "VAULT" title around all three blocks, which now look identical (the brass middle block made only K–O look like the vault).
+- [x] Tested locally with live scenes faked client-side only (no server writes, so no pop-ups for players online). Deployed `?v=6`.
+
 ## Round 5 request (2026-10-17)
 
 ### Progress

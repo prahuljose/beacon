@@ -1684,10 +1684,13 @@ function vaultHTML() {
     </div>` : '';
   return `
     <div class="vault-wrap">
-      <div class="vault">
-        <div class="v-block">${rows(VAULT_LEFT)}</div>
-        <div class="v-block mid"><div class="v-title">VAULT</div>${rows(VAULT_MID)}</div>
-        <div class="v-block">${rows(VAULT_RIGHT)}</div>
+      <div class="vault-frame">
+        <div class="v-title">VAULT</div>
+        <div class="vault">
+          <div class="v-block">${rows(VAULT_LEFT)}</div>
+          <div class="v-block">${rows(VAULT_MID)}</div>
+          <div class="v-block">${rows(VAULT_RIGHT)}</div>
+        </div>
       </div>
       ${menu}
       <div class="v-legend">
@@ -1781,6 +1784,7 @@ async function saveTurns(mutate) {
   st.current = Math.max(0, Math.min(st.entries.length - 1, st.current));
   for (const list of [S.scenes || [], S.live]) { const x = list.find(y => y.id === sc.id); if (x) x.state = clone(st); }
   renderTurnsViews();
+  renderPills();
   try { await api('gm_scene_state', { p_id: sc.id, p_state: st }); ping(); }
   catch (err) { fail(err); S.since = null; }
 }
@@ -2140,10 +2144,36 @@ function renderScenes() {
     }
   });
   renderTurnsViews();
-  const bar = $('#pill-bar');
-  bar.innerHTML = live.filter(sc => S.wins[sc.id] && S.wins[sc.id].min).map(sc =>
-    `<button class="scene-pill" data-act="win-restore" data-id="${sc.id}"><span class="live-dot"></span><b>${esc(sc.title || 'Untitled')}</b></button>`).join('');
+  renderPills();
   saveWins();
+}
+
+// Minimised windows sit as pills bottom-left. The Turn Order pill still shows
+// the round, whose turn it is, and who's next.
+function renderPills() {
+  const bar = $('#pill-bar');
+  if (!bar) return;
+  const live = S.live.filter(s => s.kind !== 'board' && S.wins[s.id] && S.wins[s.id].min);
+  bar.innerHTML = live.map(sc => sc.kind === 'turns' ? turnsPillHTML(sc)
+    : `<button class="scene-pill" data-act="win-restore" data-id="${sc.id}"><span class="live-dot"></span><b>${esc(sc.title || 'Untitled')}</b></button>`).join('');
+}
+
+function turnsPillHTML(sc) {
+  const st = normTurns((turnsScene() || sc).state);
+  const nameOf = e => { const r = e && e.sheet_id && S.sheets.get(e.sheet_id); return r ? r.data.name : (e ? e.name : ''); };
+  const cur = st.entries[st.current], next = st.entries.length > 1 ? st.entries[(st.current + 1) % st.entries.length] : null;
+  const rec = cur && cur.sheet_id && S.sheets.get(cur.sheet_id);
+  const key = `${st.round}|${st.current}|${cur ? cur.id : ''}`;
+  const changed = S.turnPillKey != null && S.turnPillKey !== key;
+  S.turnPillKey = key;
+  const av = rec ? avatarHTML(rec, 'xs') : `<span class="avatar xs">${esc((nameOf(cur) || '·').charAt(0).toUpperCase())}</span>`;
+  return `
+    <button class="scene-pill turn-pill ${changed ? 'bump' : ''}" data-act="win-restore" data-id="${sc.id}"
+      style="--accent:${esc(rec ? accentOf(rec) : '#9aa3a6')}" title="Turn Order: open">
+      <span class="tp-round">R${st.round}</span>
+      ${cur ? `${av}<span class="tp-now"><b>${esc(nameOf(cur))}</b><small>${next ? 'next: ' + esc(nameOf(next)) : 'their turn'}</small></span>`
+            : '<span class="tp-now"><b>Turn Order</b><small>not set up yet</small></span>'}
+    </button>`;
 }
 
 function buildWindow(sc) {
