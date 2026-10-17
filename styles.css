@@ -1315,16 +1315,27 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 
 /* ══ v13: login extras ═════════════════════════════════════════════════════ */
 
-/* Neon sign: warm amber tubes that sputter now and then. */
-.login-brand h1.neon { color: #fff3d6; letter-spacing: .16em;
-  text-shadow: 0 0 2px #fff, 0 0 8px #ffd27a, 0 0 18px #f5a623, 0 0 36px #e0861a, 0 0 70px rgba(224,134,26,.55); }
-.neon .tube { display: inline-block; transition: color .05s, text-shadow .05s; }
-.neon .tube.flick { animation: tube-flick .7s steps(1) both; }
-.neon.blackout .tube { animation: none; color: #3a3226; text-shadow: 0 1px 0 #0a0d0f; }
-@keyframes tube-flick {
-  0%, 18%, 40%, 62%, 100% { color: #fff3d6; text-shadow: 0 0 2px #fff, 0 0 8px #ffd27a, 0 0 18px #f5a623, 0 0 36px #e0861a, 0 0 70px rgba(224,134,26,.55); }
-  10%, 30%, 52% { color: #4a3e2a; text-shadow: 0 1px 0 #0a0d0f; }
-}
+/* Neon sign (v14): the brand slab letters traced in amber neon, on a riveted
+   steel plate that hangs from two chains and sways a touch. */
+.login-brand h1.neon-sign { margin: 0; padding-top: 44px; font-size: inherit; letter-spacing: 0; text-shadow: none; display: flex; justify-content: center; }
+.ns-plate { position: relative; display: inline-block; padding: clamp(10px, 2vw, 16px) clamp(16px, 3vw, 26px) clamp(6px, 1.4vw, 10px); border-radius: 7px;
+  background: linear-gradient(180deg, #2f393f 0%, #232b30 55%, #1b2226 100%);
+  box-shadow: inset 0 0 0 1px #4a565c, inset 0 1px 0 rgba(255,255,255,.08), 0 14px 30px rgba(0,0,0,.55);
+  transform-origin: 50% -44px; animation: ns-sway 9s ease-in-out infinite; }
+.ns-plate::before, .ns-plate::after { content: ''; position: absolute; top: -44px; width: 3px; height: 44px; border-radius: 2px;
+  background: repeating-linear-gradient(180deg, #9aa0a3 0 5px, #4a4f52 5px 8px);
+  -webkit-mask: linear-gradient(180deg, transparent, #000 40%); mask: linear-gradient(180deg, transparent, #000 40%); }
+.ns-plate::before { left: 22%; } .ns-plate::after { right: 22%; }
+.ns-rv { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #d9dde0, #6b7175); box-shadow: 0 1px 1px rgba(0,0,0,.5); }
+.ns-rv.tl { left: 8px; top: 8px; } .ns-rv.tr { right: 8px; top: 8px; } .ns-rv.bl { left: 8px; bottom: 8px; } .ns-rv.br { right: 8px; bottom: 8px; }
+.ns-plate svg { display: block; width: clamp(220px, 42vw, 400px); height: auto; overflow: visible; }
+.ns-l text { font-family: var(--slab); font-size: 86px; }
+.ns-halo { fill: none; stroke: #ffae42; stroke-width: 9; opacity: .43; transition: opacity .05s; }
+.ns-tube { fill: #20282c; stroke: #ffb54d; stroke-width: 3.2; stroke-linejoin: round; transition: stroke .05s; }
+.ns-core { fill: none; stroke: #fff0cc; stroke-width: 1.1; stroke-linejoin: round; transition: opacity .05s; }
+.ns-l.off .ns-halo, .ns-l.off .ns-core { opacity: 0; }
+.ns-l.off .ns-tube { stroke: #4d4a42; }
+@keyframes ns-sway { 0%, 100% { transform: rotate(-.6deg); } 50% { transform: rotate(.6deg); } }
 .login-brand .logo-die { box-shadow: 0 0 40px rgba(245,166,35,.4), inset 0 -3px 0 rgba(0,0,0,.25); }
 
 /* Live status on the ID cards. */
@@ -1406,6 +1417,6 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
   .desk-props { grid-column: 1 / -1; justify-self: center; width: 200px; height: 90px; margin: -4px 0 -6px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .neon .tube.flick { animation: none; }
+  .ns-plate { animation: none; }
   .desk-props .smoke path, .desk-props .ember, .desk-props .lamp-cone, .ct-status.online .ct-dot { animation: none; }
 }

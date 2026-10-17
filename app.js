@@ -993,25 +993,42 @@ const LOCK_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 
 // ── Login page extras: neon sign, live status, GM's desk, vault door ──────
 
-// Each letter is its own tube so one can sputter while the rest stay lit.
+// The sign: the slab letters traced in neon on a hanging steel plate. Each
+// letter is its own tube so one can sputter while the rest stay lit.
 function neonHTML() {
-  return `<h1 class="neon" aria-label="Debt">${'DEBT'.split('').map((c, i) => `<span class="tube" style="--n:${i}" aria-hidden="true">${c}</span>`).join('')}</h1>`;
+  const letters = 'DEBT'.split('').map((c, i) => {
+    const x = 50 + i * 80;
+    const t = cls => `<text class="${cls}" x="${x}" y="80" text-anchor="middle">${c}</text>`;
+    return `<g class="ns-l">${t('ns-halo')}${t('ns-tube')}${t('ns-core')}</g>`;
+  }).join('');
+  return `<h1 class="neon-sign" aria-label="Debt"><span class="ns-plate">
+      <i class="ns-rv tl"></i><i class="ns-rv tr"></i><i class="ns-rv bl"></i><i class="ns-rv br"></i>
+      <svg viewBox="0 0 340 100" aria-hidden="true"><defs><filter id="ns-blur" x="-30%" y="-40%" width="160%" height="180%"><feGaussianBlur stdDeviation="5"/></filter></defs>
+        ${letters.replace(/class="ns-halo"/g, 'class="ns-halo" filter="url(#ns-blur)"')}</svg>
+    </span></h1>`;
+}
+// A tube buzzes off and on a few times; rarely the whole sign drops out.
+function sputter(el) {
+  const seq = [0, 1, 0, 0, 1, 0, 1, 1];
+  let n = 0;
+  const iv = setInterval(() => {
+    el.classList.toggle('off', !seq[n]);
+    if (++n >= seq.length) { clearInterval(iv); el.classList.remove('off'); }
+  }, 75);
 }
 let neonTimer = null;
 function startNeon() {
   clearTimeout(neonTimer);
   if (reducedMotion()) return;
   const tick = () => {
-    const h = $('.login .neon');
-    if (!h) return;                       // left the login page
-    const tubes = h.querySelectorAll('.tube');
-    if (Math.random() < 0.12) {           // now and then the whole sign drops out
-      h.classList.add('blackout');
-      setTimeout(() => h.classList.remove('blackout'), 500 + Math.random() * 500);
+    const sign = $('.login .neon-sign');
+    if (!sign) return;                    // left the login page
+    const tubes = [...sign.querySelectorAll('.ns-l')];
+    if (Math.random() < 0.12) {
+      tubes.forEach(t => t.classList.add('off'));
+      setTimeout(() => tubes.forEach(t => t.classList.remove('off')), 500 + Math.random() * 500);
     } else {
-      const t = tubes[Math.floor(Math.random() * tubes.length)];
-      t.classList.remove('flick'); void t.offsetWidth; t.classList.add('flick');
-      if (Math.random() < 0.3) setTimeout(() => { t.classList.remove('flick'); void t.offsetWidth; t.classList.add('flick'); }, 260);
+      sputter(tubes[Math.floor(Math.random() * tubes.length)]);
     }
     neonTimer = setTimeout(tick, 2500 + Math.random() * 5500);
   };
