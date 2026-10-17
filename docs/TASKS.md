@@ -20,6 +20,13 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 13 (2026-10-18)
+- [x] Tokens on scenes and the Drawing Board (anyone). New "◉ Token" tool with a picker: every character, GM, or NPC (type a name). Clicking places it; a character or the GM has one token per scene (placing again moves it), NPCs can repeat. "✥ Move" (was "Move text") drags tokens and text; others see the drag live (`tokmove` broadcast). Erase removes a token. GM "Clear all" clears tokens too. Tokens are strokes with `piece` ('gm' | 'sheet:<id>' | 'npc:<label>'), drawn as a DOM layer over the canvas. supabase/v7.sql: `strokes.piece`, `place_token`, `move_stroke` accepts tokens.
+- [x] GM dice stats on the GM page (GM only, `gm_roll_history`). Crew cards, sortable per-player table with ★ leaders, and a detail view per player: 2d6 totals vs expected, d6 faces vs fair, most-rolled labels, best/worst, recent form, rolls per game day. Ranges: all time / 7 days / 30 days / one game day (named Session #N when it matches a GM session date). "Clear dice log" now archives into `private.roll_archive` so stats survive. Note: if `public.rolls` gets a new column, add it to `private.roll_archive` too (the union uses `select *`).
+- [x] Connection banner: "Reconnecting…" / "You're offline." after 2 failed syncs or the browser going offline, then "Back online." for ~2.6 s. Sheet edits made offline wait in `pending` (`waiting: true`) and save when the connection returns; the Saved chip says "Not saved yet · offline".
+- [ ] Dice tray polish: design mockup shown to the user (felt tray, pip d6 faces, shaped polyhedral dice, doubles stamp and shake, synthesized clack sound with a toggle, reduced-motion fallback). DO NOT build until the user confirms the design.
+- Tested locally with a temporary GM session on a hidden throwaway scene and a ZZ Test character, all deleted afterwards. Deployed `?v=14`.
+
 ## Round 12 (2026-10-18)
 - [x] Online chip padding: the first portrait was pulled past the pill's left edge by the -7px overlap margin. The first portrait now has no negative margin, the chip has 5px left padding, and portraits are round. Checked with 1 and 3 portraits on desktop and phone. Deployed `?v=13`.
 

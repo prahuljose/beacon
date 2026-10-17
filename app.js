@@ -235,6 +235,10 @@ const S = {
   deleted: null,
   vaultMenu: null,
   z: 40,
+  tokenPick: lsGet('debt.tokpick') || '',  // 'gm' | 'sheet:<id>' | 'npc'
+  npcName: '',
+  stats: { rows: null, loading: false, range: 'all', sel: null, sort: 'rolls', at: 0 },
+  net: 'ok',             // connection banner: 'ok' | 'down' | 'back'
 };
 const pending = new Map(); // `${id}|${path}` -> { id, path, value, timer }
 
@@ -285,8 +289,47 @@ const ERRORS = {
 };
 function fail(err) {
   if (err && err.code === '28P01') return signOut('You were signed out. Log in again.');
+  if (isNetErr(err)) { netDown(); return toast('You’re offline. Try that again once you’re back.', true); }
   toast(ERRORS[err && err.message] || (err && err.message) || 'Something went wrong.', true);
 }
+
+// ── Connection banner ──────────────────────────────────────────────────────
+// fetch() rejects with a TypeError when the network is gone; our own errors
+// carry a code. Sheet edits made while offline wait in `pending` and save
+// once a sync gets through again.
+
+const isNetErr = err => err instanceof TypeError || (typeof navigator !== 'undefined' && navigator.onLine === false && !(err && err.code));
+let netFails = 0, netTimer = null;
+function netDown() {
+  if (S.net === 'down') return renderNet();
+  S.net = 'down';
+  renderNet();
+}
+function netUp() {
+  netFails = 0;
+  if (S.net !== 'down') return;
+  S.net = 'back';
+  renderNet();
+  for (const [key, p] of pending) if (p.waiting) { p.waiting = false; flushPatch(key, p); }
+  clearTimeout(netTimer);
+  netTimer = setTimeout(() => { if (S.net === 'back') { S.net = 'ok'; renderNet(); } }, 2600);
+}
+function renderNet() {
+  const el = $('#net');
+  if (!el) return;
+  const waiting = [...pending.values()].filter(p => p.waiting).length;
+  const edits = waiting ? ` ${waiting} edit${waiting === 1 ? '' : 's'} will save when you’re back.` : ' Edits will save when you’re back.';
+  if (S.net === 'down') {
+    const off = navigator.onLine === false;
+    el.className = 'net-banner down';
+    el.innerHTML = `<span class="net-spin" aria-hidden="true"></span><b>${off ? 'You’re offline.' : 'Reconnecting…'}</b><span>${esc(edits.trim())}</span>`;
+  } else if (S.net === 'back') {
+    el.className = 'net-banner back';
+    el.innerHTML = '<span class="net-ok" aria-hidden="true">✓</span><b>Back online.</b><span>Everything is up to date.</span>';
+  } else { el.className = 'net-banner'; el.innerHTML = ''; }
+}
+window.addEventListener('offline', () => { if (S.ready) netDown(); });
+window.addEventListener('online', () => { if (S.ready) sync(); });
 
 // ── Realtime: sync pings, live strokes, location pings ─────────────────────
 
@@ -313,6 +356,12 @@ function connectRealtime() {
       sync().then(() => { S.drafts.delete(p.did); redrawScene(p.scene); });
     });
     channel.on('broadcast', { event: 'loc' }, ({ payload: p }) => showLocPing(p));
+    channel.on('broadcast', { event: 'tokmove' }, ({ payload: p }) => {
+      const st = p && (S.strokes.get(p.scene) || new Map()).get(p.id);
+      if (!st || !Array.isArray(p.points) || p.points.length !== 2) return;
+      st.points = p.points;
+      redrawScene(p.scene);
+    });
     channel.on('presence', { event: 'sync' }, () => { S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); });
     channel.subscribe(status => {
       S.rtLive = status === 'SUBSCRIBED';
@@ -437,6 +486,7 @@ async function sync() {
     const since = S.since ? new Date(Date.parse(trimTs(S.since)) - 5000).toISOString() : null;
     const r = await api('sync', { p_since: since });
     S.since = r.now;
+    netUp();
     S.me = r.me;
     const changed = new Set(), dirtyScenes = new Set();
     let rollsChanged = false, crewChanged = false, liveChanged = false, vaultChanged = false, chatChanged = false, rulesChanged = false;
@@ -484,7 +534,7 @@ async function sync() {
     if (isGM() && r.scenes_sig !== S.scenesSig) { S.scenesSig = r.scenes_sig; loadScenes(); }
 
     if (!S.ready) { S.ready = true; renderApp(); trackPresence(); return; }
-    if (changed.size) { renderNav(); renderOnline(); }
+    if (changed.size) { renderNav(); renderOnline(); refreshTokPickers(); }
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);
     if (rulesChanged && S.route.view === 'rules') refreshMain(new Set(), true);
     if (crewChanged) renderClock();
@@ -495,6 +545,7 @@ async function sync() {
     for (const id of dirtyScenes) redrawScene(id);
   } catch (err) {
     if (err.code === '28P01') signOut('You were signed out. Log in again.');
+    else if (isNetErr(err) && (++netFails >= 2 || navigator.onLine === false)) netDown();
   } finally {
     S.syncing = false;
   }
@@ -561,11 +612,13 @@ async function flushPatch(key, p, keepalive = false) {
     await api('patch_sheet', { p_id: p.id, p_path: p.path.split('.'), p_value: p.value }, { keepalive });
     ping();
   } catch (err) {
+    // Offline: keep the edit and send it once the connection is back.
+    if (isNetErr(err) && !keepalive && pending.get(key) === p) { p.waiting = true; netDown(); return; }
     fail(err);
     S.since = null; // pull the true state back
   } finally {
-    if (pending.get(key) === p) pending.delete(key);
-    if (!pending.size) showSaving(false);
+    if (pending.get(key) === p && !p.waiting) pending.delete(key);
+    showSaving();
   }
 }
 
@@ -592,7 +645,9 @@ window.addEventListener('pagehide', () => {
 
 function showSaving(on) {
   const el = $('#saving');
-  if (el) el.textContent = on ? 'Saving…' : 'Saved';
+  if (!el) return;
+  const all = [...pending.values()], busy = on || all.some(p => !p.waiting);
+  el.textContent = busy ? 'Saving…' : all.length ? 'Not saved yet · offline' : 'Saved';
 }
 
 // ── Dice ───────────────────────────────────────────────────────────────────
@@ -828,6 +883,7 @@ function renderApp() {
       <main class="main" id="main"></main>
       <aside class="log" id="log" aria-label="Dice"></aside>
     </div>
+    <div id="net" class="net-banner" role="status" aria-live="polite"></div>
     <div id="scene-root"><div class="pill-bar" id="pill-bar"></div></div>
     <button class="log-fab" id="log-fab" data-act="log-toggle" aria-label="Open dice">${die(22)}<span id="fab-last"></span></button>
     <input type="file" id="file-portrait" accept="image/*" hidden>
@@ -839,6 +895,7 @@ function renderApp() {
   renderMain();
   renderLog();
   renderScenes();
+  renderNet();
 }
 
 function orderedSheets() {
@@ -964,7 +1021,7 @@ function renderMain() {
   const r = S.route;
   if (r.view === 'sheet' && S.sheets.has(r.id)) main.innerHTML = sheetHTML(S.sheets.get(r.id));
   else if (r.view === 'rules') main.innerHTML = rulesHTML();
-  else if (r.view === 'gm' && isGM()) { main.innerHTML = gmHTML(); if (S.gmNotes === null) loadGM(); }
+  else if (r.view === 'gm' && isGM()) { main.innerHTML = gmHTML(); if (S.gmNotes === null) loadGM(); if (!S.stats.rows && !S.stats.loading) loadStats(); }
   else if (r.view === 'scenes' && isGM()) { main.innerHTML = scenesHTML(); renderTurnsViews(); }
   else { main.innerHTML = crewHTML(); mountBoard(); renderChat(true); }
   S.deferRender = false;
@@ -1734,6 +1791,7 @@ function gmHTML() {
           <h2 style="margin-top:18px">Dice log</h2>
           <button class="btn danger" data-act="gm-clear">Clear for everyone</button>
         </section>
+        <section class="panel s12 stats-panel" id="dice-stats">${diceStatsHTML()}</section>
         <section class="panel s12">
           <h2>Deleted characters</h2>
           ${deleted.length ? deleted.map(x => `
@@ -1777,6 +1835,233 @@ function sessionsHTML() {
       </div>
       <textarea data-session-body="${g.id}" data-fk="sb-${g.id}" rows="5" placeholder="What happened in session ${n}…" aria-label="Notes for session ${n}">${esc(g.body)}</textarea>
     </div>`).join('')}</div>`;
+}
+
+// ── GM dice stats ──────────────────────────────────────────────────────────
+// Every roll ever made (the log plus rolls the GM cleared), per player. Only
+// the GM can load this. Worked out in the browser from compact rows.
+
+async function loadStats() {
+  S.stats.loading = true;
+  try {
+    const rows = await api('gm_roll_history');
+    S.stats.rows = rows.map(a => ({ id: a[0], sheet: a[1], who: a[2], kind: a[3], sides: a[4], dice: a[5] || [], total: a[6],
+      at: Date.parse(trimTs(a[7])), priv: a[8], label: a[9] || '', history: a[10] || [], extras: a[11] || [], wear: a[12] }));
+    S.stats.at = Date.now();
+  } catch (err) { fail(err); }
+  S.stats.loading = false;
+  const el = $('#dice-stats');
+  if (el) el.innerHTML = diceStatsHTML();
+}
+
+const dayKey = t => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const pct = (a, b) => (b ? Math.round(a / b * 1000) / 10 : 0);
+const fmtDay = k => new Date(k + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
+function statsRange() {
+  const r = S.stats.range;
+  if (r === 'all') return () => true;
+  if (r === '7d' || r === '30d') { const from = Date.now() - (r === '7d' ? 7 : 30) * 864e5; return x => x.at >= from; }
+  if (r.startsWith('day:')) { const k = r.slice(4); return x => dayKey(x.at) === k; }
+  return () => true;
+}
+function statsWhoKey(x) {
+  if (x.sheet) return x.sheet;
+  return x.who === 'GM' ? 'gm' : 'gone:' + x.who;
+}
+function statsPerson(key) {
+  if (key === 'gm') return { name: 'GM', av: '<span class="avatar sm gm-av">GM</span>', color: S.gmColor };
+  const rec = S.sheets.get(key);
+  if (rec) return { name: rec.data.name || 'Unnamed', av: avatarHTML(rec, 'sm'), color: accentOf(rec) };
+  const n = key.startsWith('gone:') ? key.slice(5) : 'Deleted';
+  return { name: n + ' (deleted)', av: `<span class="avatar sm">${esc(n.charAt(0).toUpperCase())}</span>`, color: '#6c777b' };
+}
+
+// All the numbers for one set of rolls.
+function crunch(list) {
+  const o = { rolls: list.length, dice: 0, luckSum: 0, two: 0, dbl: 0, dblExp: 0, snake: 0, box: 0, ones: 0, tops: 0,
+              rerolls: 0, grit: 0, wear: 0, priv: 0, hist: Array(13).fill(0), n2d6: 0, sum2d6: 0, faces: Array(7).fill(0), d6n: 0,
+              labels: new Map(), days: new Map(), best: null, worst: null, form: [] };
+  for (const x of list) {
+    const all = [...x.dice, ...x.history.flatMap(h => h.dice || [])];
+    for (const v of all) {
+      o.dice++; o.luckSum += x.sides > 1 ? (v - 1) / (x.sides - 1) : .5;
+      if (v === 1) o.ones++; if (v === x.sides) o.tops++;
+      if (x.sides === 6 && v >= 1 && v <= 6) { o.faces[v]++; o.d6n++; }
+    }
+    if (x.dice.length === 2) {
+      o.two++; o.dblExp += 1 / x.sides;
+      if (x.dice[0] === x.dice[1]) { o.dbl++; if (x.dice[0] === 1) o.snake++; if (x.dice[0] === x.sides) o.box++; }
+      if (x.sides === 6 && x.kind !== 'grit_session') { const t = x.dice[0] + x.dice[1]; o.hist[t]++; o.n2d6++; o.sum2d6 += t; }
+    }
+    o.rerolls += x.history.length; o.grit += x.extras.length; if (x.wear === 1) o.wear++; if (x.priv) o.priv++;
+    if (x.kind !== 'grit_session') {
+      const lb = (x.label || 'Roll').replace(/\s+/g, ' ').trim().slice(0, 40) || 'Roll';
+      const L = o.labels.get(lb) || { n: 0, sum: 0 }; L.n++; L.sum += x.total; o.labels.set(lb, L);
+      if (!o.best || x.total > o.best.total) o.best = x;
+      if (!o.worst || x.total < o.worst.total) o.worst = x;
+    }
+    const dk = dayKey(x.at), D = o.days.get(dk) || { n: 0, luck: 0, dice: 0 };
+    D.n++; for (const v of x.dice) { D.luck += x.sides > 1 ? (v - 1) / (x.sides - 1) : .5; D.dice++; } o.days.set(dk, D);
+    if (x.dice.length) o.form.push(x.dice.reduce((a, v) => a + (x.sides > 1 ? (v - 1) / (x.sides - 1) : .5), 0) / x.dice.length);
+  }
+  o.luck = o.dice ? Math.round(o.luckSum / o.dice * 100) : null;   // 50 = exactly average
+  o.avg2d6 = o.n2d6 ? Math.round(o.sum2d6 / o.n2d6 * 10) / 10 : null;
+  o.dblRate = pct(o.dbl, o.two); o.dblExpRate = o.two ? Math.round(o.dblExp / o.two * 1000) / 10 : 0;
+  return o;
+}
+
+const STAT_COLS = [
+  ['rolls', 'Rolls', o => o.rolls, o => o.rolls],
+  ['luck', 'Luck', o => o.luck ?? -1, o => (o.luck == null ? '—' : o.luck), 'Average die face on a 0–100 scale. 50 is dead average.'],
+  ['avg', 'Avg 2d6', o => o.avg2d6 ?? -1, o => (o.avg2d6 == null ? '—' : o.avg2d6.toFixed(1)), 'Expected: 7.0'],
+  ['dbl', 'Doubles', o => o.dblRate, o => (o.two ? `${o.dbl} <small>${o.dblRate}%</small>` : '—'), 'Two-dice rolls that came up doubles. Expected about 16.7% on 2d6.'],
+  ['ones', '1s', o => pct(o.ones, o.dice), o => (o.dice ? `${o.ones} <small>${pct(o.ones, o.dice)}%</small>` : '—'), 'Dice that showed a 1'],
+  ['tops', 'Top faces', o => pct(o.tops, o.dice), o => (o.dice ? `${o.tops} <small>${pct(o.tops, o.dice)}%</small>` : '—'), 'Dice that showed their highest face'],
+  ['rerolls', 'Wear rerolls', o => o.rerolls, o => o.rerolls],
+  ['grit', 'Grit dice', o => o.grit, o => o.grit, 'Grit dice added to their rolls'],
+  ['best', 'Best', o => (o.best ? o.best.total : -1e9), o => (o.best ? o.best.total : '—'), 'Highest total (with modifiers)'],
+];
+
+function luckClass(v) { return v == null ? '' : v >= 56 ? 'hot' : v <= 44 ? 'cold' : ''; }
+function luckWord(v) { return v == null ? 'No dice yet' : v >= 60 ? 'On fire' : v >= 54 ? 'Lucky' : v > 46 ? 'Average' : v > 40 ? 'Unlucky' : 'Cursed'; }
+
+function diceStatsHTML() {
+  const st = S.stats;
+  const head = `<h2><span class="grow">Dice stats</span>
+      <span class="small dim" style="font-family:var(--type)">${st.rows ? 'Only you can see this' : ''}</span>
+      <button class="btn sm" data-act="stats-refresh" ${st.loading ? 'disabled' : ''}>${REROLL_SVG} ${st.loading ? 'Loading…' : 'Refresh'}</button></h2>`;
+  if (!st.rows) return head + `<p class="small dim">${st.loading ? 'Counting every roll…' : 'Could not load the stats. Try Refresh.'}</p>`;
+
+  const inRange = statsRange();
+  const rows = st.rows.filter(inRange);
+  const days = [...new Set(st.rows.map(x => dayKey(x.at)))].sort().reverse();
+  const ranges = [['all', 'All time'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days']];
+  const sessions = sortedSessions();
+  const dayLabel = k => { const i = sessions.findIndex(g => g.date === k); return (i >= 0 ? `Session #${i + 1} · ` : '') + fmtDay(k); };
+  const rangeBar = `<div class="stats-ranges">${ranges.map(([k, l]) => `<button class="btn sm ${st.range === k ? 'on' : ''}" data-act="stats-range" data-v="${k}">${l}</button>`).join('')}
+      <select data-stats-day aria-label="One game day"><option value="">One game day…</option>${days.map(k => `<option value="day:${k}" ${st.range === 'day:' + k ? 'selected' : ''}>${esc(dayLabel(k))}</option>`).join('')}</select></div>`;
+
+  // Group per player.
+  const groups = new Map();
+  for (const x of rows) { const k = statsWhoKey(x); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
+  const order = [...orderedSheets().map(r => r.id), 'gm'];
+  const keys = [...new Set([...order.filter(k => groups.has(k)), ...groups.keys()])];
+  const people = keys.map(k => ({ k, p: statsPerson(k), o: crunch(groups.get(k)) }));
+  const crew = crunch(rows);
+  const col = STAT_COLS.find(c => c[0] === st.sort) || STAT_COLS[0];
+  people.sort((a, b) => col[2](b.o) - col[2](a.o));
+  if (!st.sel || !groups.has(st.sel)) st.sel = people[0] ? people[0].k : null;
+
+  if (!rows.length) return head + rangeBar + '<p class="small dim" style="margin-top:14px">No rolls in this range yet.</p>';
+
+  // The leader in each column (players only, needs a few rolls to count).
+  const lead = {};
+  for (const c of STAT_COLS) {
+    const pool = people.filter(x => x.o.rolls >= 3 && x.k !== 'gm');
+    if (pool.length < 2) continue;
+    const top = Math.max(...pool.map(x => c[2](x.o)));
+    const leaders = pool.filter(x => c[2](x.o) === top);
+    if (top > 0 && leaders.length === 1) lead[c[0]] = leaders[0].k;   // ties get no star
+  }
+
+  const crewCards = `<div class="stats-cards">
+      ${statCard('Rolls', crew.rolls.toLocaleString(), `${crew.dice.toLocaleString()} dice thrown`)}
+      ${statCard('Crew luck', crew.luck ?? '—', luckWord(crew.luck), luckClass(crew.luck))}
+      ${statCard('Avg 2d6', crew.avg2d6 == null ? '—' : crew.avg2d6.toFixed(1), 'Expected 7.0')}
+      ${statCard('Doubles', crew.dbl, crew.two ? `${crew.dblRate}% · expected ${crew.dblExpRate}%` : 'No two-dice rolls')}
+      ${statCard('Wear rerolls', crew.rerolls, `${crew.wear} Wear banked from doubles`)}
+      ${statCard('Grit dice', crew.grit, `${crew.priv} private rolls`)}
+    </div>`;
+
+  const table = `<div class="stats-table-wrap"><table class="stats-table">
+      <thead><tr><th>Player</th>${STAT_COLS.map(c => `<th><button data-act="stats-sort" data-v="${c[0]}" class="${st.sort === c[0] ? 'on' : ''}" ${c[4] ? `title="${esc(c[4])}"` : ''}>${c[1]}${st.sort === c[0] ? ' ▾' : ''}</button></th>`).join('')}</tr></thead>
+      <tbody>${people.map(({ k, p, o }) => `
+        <tr class="${st.sel === k ? 'sel' : ''}" data-act="stats-sel" data-v="${esc(k)}" style="--accent:${esc(p.color)}" tabindex="0">
+          <td><span class="stats-who">${p.av}<b>${esc(p.name)}</b></span></td>
+          ${STAT_COLS.map(c => `<td class="${lead[c[0]] === k ? (c[0] === 'ones' ? 'lead bad' : 'lead') : ''} ${c[0] === 'luck' ? 'luck ' + luckClass(o.luck) : ''}">${c[3](o)}</td>`).join('')}
+        </tr>`).join('')}</tbody></table></div>
+      <p class="small dim stats-foot">★ marks the clear leader in each column (3+ rolls); a red ★ is the most 1s. Click a column to sort, or a player to see their detail. Rerolled dice count in luck and faces.</p>`;
+
+  const sel = people.find(x => x.k === st.sel);
+  return head + rangeBar + crewCards + table + (sel ? playerStatsHTML(sel) : '');
+}
+
+function statCard(label, value, sub, cls = '') {
+  return `<div class="stat-card ${cls}"><span class="sc-label">${label}</span><b class="sc-value">${value}</b><span class="sc-sub">${sub}</span></div>`;
+}
+
+function playerStatsHTML({ p, o }) {
+  const EXP2 = [0, 0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1].map(n => n / 36 * 100);
+  const histMax = Math.max(...EXP2, ...o.hist.map(n => pct(n, o.n2d6)), 1);
+  const hist = o.n2d6 ? `<div class="bars hist">${o.hist.map((n, t) => t < 2 ? '' : `
+      <div class="bar-col" title="${t}: ${n} of ${o.n2d6} rolls (${pct(n, o.n2d6)}%, expected ${EXP2[t].toFixed(1)}%)">
+        <span class="bar-n">${n || ''}</span>
+        <div class="bar-track"><i class="bar ${t === 2 ? 'one' : t === 12 ? 'max' : ''}" style="height:${pct(n, o.n2d6) / histMax * 100}%"></i><i class="exp" style="bottom:${EXP2[t] / histMax * 100}%"></i></div>
+        <span class="bar-x">${t}</span></div>`).join('')}</div>` : '<p class="small dim">No 2d6 rolls in this range.</p>';
+
+  const fMax = Math.max(...o.faces.slice(1).map(n => pct(n, o.d6n)), 100 / 6, 1);
+  const faces = o.d6n ? `<div class="bars faces">${o.faces.map((n, f) => f === 0 ? '' : `
+      <div class="bar-col" title="${f}: ${n} of ${o.d6n} d6 (${pct(n, o.d6n)}%, expected 16.7%)">
+        <span class="bar-n">${pct(n, o.d6n)}%</span>
+        <div class="bar-track"><i class="bar ${f === 1 ? 'one' : f === 6 ? 'max' : ''}" style="height:${pct(n, o.d6n) / fMax * 100}%"></i><i class="exp" style="bottom:${100 / 6 / fMax * 100}%"></i></div>
+        <span class="bar-x pip-x">${f}</span></div>`).join('')}</div>` : '<p class="small dim">No d6 rolled in this range.</p>';
+
+  const labels = [...o.labels.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 6);
+  const lMax = labels.length ? labels[0][1].n : 1;
+  const labelsHTML = labels.length ? `<div class="top-labels">${labels.map(([l, v]) => `
+      <div class="tl-row"><span class="tl-name" title="${esc(l)}">${esc(l)}</span><span class="tl-bar"><i style="width:${v.n / lMax * 100}%"></i></span><span class="tl-n">${v.n}×</span><span class="tl-avg" title="Average total">avg ${(v.sum / v.n).toFixed(1)}</span></div>`).join('')}</div>` : '<p class="small dim">Nothing yet.</p>';
+
+  const days = [...o.days.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-14);
+  const dMax = Math.max(...days.map(d => d[1].n), 1);
+  const daysHTML = days.length > 0 ? `<div class="bars days">${days.map(([k, d]) => { const lk = d.dice ? Math.round(d.luck / d.dice * 100) : null; return `
+      <div class="bar-col" title="${esc(fmtDay(k))}: ${d.n} rolls · luck ${lk ?? '—'}">
+        <span class="bar-n">${d.n}</span>
+        <div class="bar-track"><i class="bar ${luckClass(lk)}" style="height:${d.n / dMax * 100}%"></i></div>
+        <span class="bar-x">${esc(fmtDay(k))}</span></div>`; }).join('')}</div>` : '';
+
+  const form = o.form.slice(-30);
+  const formHTML = form.length ? `<div class="form-strip" aria-label="Last ${form.length} rolls, above or below average">${form.map(v => `<i class="${v > .5 ? 'up' : v < .5 ? 'down' : ''}" style="height:${Math.max(6, Math.abs(v - .5) * 2 * 100) / 2}%" title="${Math.round(v * 100)}"></i>`).join('')}</div>` : '';
+
+  const rollLine = r => r ? `<b>${r.total}</b> <span class="dim">· ${esc(r.label || 'Roll')} · ${r.dice.join(', ')} · ${new Date(r.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>` : '—';
+
+  return `<div class="player-stats" style="--accent:${esc(p.color)}">
+      <div class="ps-head">${p.av.replace('avatar sm', 'avatar md')}<div><h3>${esc(p.name)}</h3><span class="luck-word ${luckClass(o.luck)}">${luckWord(o.luck)}${o.luck != null ? ` · luck ${o.luck}` : ''}</span></div></div>
+      <div class="stats-cards">
+        ${statCard('Rolls', o.rolls, `${o.dice} dice · ${o.priv} private`)}
+        ${statCard('Avg 2d6', o.avg2d6 == null ? '—' : o.avg2d6.toFixed(1), o.n2d6 ? `${o.n2d6} rolls · expected 7.0` : 'No 2d6 yet')}
+        ${statCard('Doubles', o.dbl, o.two ? `${o.dblRate}% · expected ${o.dblExpRate}%` : 'No two-dice rolls')}
+        ${statCard('Snake eyes · Boxcars', `${o.snake} · ${o.box}`, 'Double 1s · double top faces')}
+        ${statCard('Wear', o.rerolls, `rerolls used · ${o.wear} banked`)}
+        ${statCard('Grit dice', o.grit, 'added to their rolls')}
+      </div>
+      <div class="ps-grid">
+        <div class="ps-box"><h4>2d6 totals <small>bars = this player · line = expected</small></h4>${hist}</div>
+        <div class="ps-box"><h4>d6 faces <small>line = fair die (16.7%)</small></h4>${faces}</div>
+        <div class="ps-box"><h4>Most rolled</h4>${labelsHTML}</div>
+        <div class="ps-box"><h4>Best and worst</h4>
+          <div class="bw"><span class="tag green">Best</span>${rollLine(o.best)}</div>
+          <div class="bw"><span class="tag red">Worst</span>${rollLine(o.worst)}</div>
+          ${formHTML ? `<h4 style="margin-top:14px">Recent form <small>last ${form.length} rolls · up = above average</small></h4>${formHTML}` : ''}
+        </div>
+        ${daysHTML ? `<div class="ps-box wide"><h4>Rolls per game day <small>colour = luck that day</small></h4>${daysHTML}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+document.addEventListener('change', e => {
+  if (!e.target.matches || !e.target.matches('[data-stats-day]')) return;
+  S.stats.range = e.target.value || 'all';
+  rerenderStats();
+});
+document.addEventListener('keydown', e => {
+  const tr = e.key === 'Enter' && e.target.closest && e.target.closest('tr[data-act="stats-sel"]');
+  if (tr) { S.stats.sel = tr.dataset.v; rerenderStats(); const again = document.querySelector(`tr[data-v="${CSS.escape(tr.dataset.v)}"]`); if (again) again.focus(); }
+});
+
+function rerenderStats() {
+  const el = $('#dice-stats');
+  if (el) el.innerHTML = diceStatsHTML();
 }
 
 async function loadGM() {
@@ -1996,11 +2281,12 @@ function canvasFor(sc) {
 
 function toolsHTML(sc) {
   const gm = isGM();
-  const names = { pen: '✎ Pen', erase: '⌫ Erase', text: 'T Text', select: '✥ Move text', ping: '◎ Ping' };
+  const names = { pen: '✎ Pen', erase: '⌫ Erase', text: 'T Text', token: '◉ Token', select: '✥ Move', ping: '◎ Ping' };
   return `
     <div class="draw-tools">
       ${Object.keys(names).map(t => `<button class="tool ${S.tool === t ? 'on' : ''}" data-tool="${t}">${names[t]}</button>`).join('')}
       <span class="widths pen-only" role="radiogroup" aria-label="Pen width">${PEN_WIDTHS.map(w => `<button class="wbtn ${S.penWidth === w ? 'on' : ''}" data-width="${w}" role="radio" aria-checked="${S.penWidth === w}" aria-label="Pen width ${w}" title="Pen width ${w}"><i style="width:${Math.min(15, w + 2)}px;height:${Math.min(15, w + 2)}px"></i></button>`).join('')}</span>
+      <span class="tokpicks token-only" role="radiogroup" aria-label="Which token">${tokPickHTML()}</span>
       <span class="tsizes text-only" role="radiogroup" aria-label="Text size">${TEXT_SIZES.map(([w, l], i) => `<button class="tsbtn ${S.textSize === w ? 'on' : ''}" data-tsize="${w}" role="radio" aria-checked="${S.textSize === w}" title="Text size ${l}" style="font-size:${10 + i * 2.5}px">${l}</button>`).join('')}</span>
       ${gm ? `<label class="swatch gm-swatch" title="Your pen colour (GM only)" style="background:${esc(myColor())}"><input type="color" value="${esc(myColor())}" data-gm-color aria-label="Pen colour"></label>`
            : `<span class="swatch" style="background:${esc(myColor())}" title="Your colour"></span>`}
@@ -2103,10 +2389,10 @@ function makeCanvas(sc) {
   el.className = 'draw ' + sc.kind;
   el.dataset.tool = S.tool;
   el.innerHTML = `${toolsHTML(sc)}
-    <div class="draw-stage"><div class="draw-box">${sc.kind === 'image' ? '<img class="draw-img" alt="" draggable="false">' : ''}<canvas></canvas><div class="pings"></div></div></div>`;
+    <div class="draw-stage"><div class="draw-box">${sc.kind === 'image' ? '<img class="draw-img" alt="" draggable="false">' : ''}<canvas></canvas><div class="tokens"></div><div class="pings"></div></div></div>`;
   const c = { id: sc.id, kind: sc.kind, el, stage: el.querySelector('.draw-stage'), box: el.querySelector('.draw-box'),
               canvas: el.querySelector('canvas'), img: el.querySelector('.draw-img'),
-              aspect: sc.kind === 'board' ? 16 / 7 : 16 / 10, imgKey: null, cur: null, erase: null };
+              aspect: sc.kind === 'board' ? 16 / 7 : 16 / 10, imgKey: null, cur: null, erase: null, tokEls: new Map() };
 
   el.addEventListener('click', e => {
     const t = e.target.closest('.tool[data-tool]');   // the .draw wrapper carries data-tool too
@@ -2120,6 +2406,13 @@ function makeCanvas(sc) {
     if (ts) {
       S.textSize = +ts.dataset.tsize; lsSet('debt.textsize', String(S.textSize));
       document.querySelectorAll('.tsbtn').forEach(b => { const on = +b.dataset.tsize === S.textSize; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+      return;
+    }
+    const tp = e.target.closest('[data-tokpick]');
+    if (tp) {
+      S.tokenPick = tp.dataset.tokpick; lsSet('debt.tokpick', S.tokenPick);
+      refreshTokPickers();
+      if (S.tokenPick === 'npc') { const inp = c.el.querySelector('.npc-name'); if (inp) inp.focus({ preventScroll: true }); }
       return;
     }
     if (e.target.closest('[data-max]')) { toggleMax(c); return; }
@@ -2148,8 +2441,9 @@ function makeCanvas(sc) {
     const [x, y] = norm(e);
     if (S.tool === 'ping') { const p = { scene: c.id, x, y, color: myColor(), who: myName() }; showLocPing(p); send('loc', p); return; }
     if (S.tool === 'text') { e.preventDefault(); openTextInput(c, x, y); return; }
-    if (S.tool === 'select') {
-      const h = hitText(c, e);
+    if (S.tool === 'token' && !hitToken(c, e)) { e.preventDefault(); placeToken(c, x, y); return; }
+    if (S.tool === 'select' || S.tool === 'token') {
+      const h = hitToken(c, e) || (S.tool === 'select' && hitText(c, e));
       if (!h) return;
       e.preventDefault();
       try { box.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
@@ -2171,6 +2465,7 @@ function makeCanvas(sc) {
       const r4 = v => Math.round(Math.max(0, Math.min(1, v)) * 10000) / 10000;
       st.points = [r4(x - c.drag.dx), r4(y - c.drag.dy)];
       redraw(c);
+      if (Date.now() - lastSend > 60) { lastSend = Date.now(); send('tokmove', { scene: c.id, id: st.id, points: st.points }); }
       return;
     }
     if (c.cur) {
@@ -2191,6 +2486,7 @@ function makeCanvas(sc) {
     if (c.drag) {
       const drag = c.drag, st = (S.strokes.get(c.id) || new Map()).get(drag.id);
       c.drag = null;
+      redraw(c);
       if (st) {
         try { applyStroke(await api('move_stroke', { p_id: drag.id, p_points: st.points })); ping(); }
         catch (err) { fail(err); S.since = null; }
@@ -2261,9 +2557,10 @@ function redraw(c) {
     }
     ctx.strokeStyle = s.color; ctx.lineWidth = Math.max(1.5, s.width * scale); strokePath(ctx, s.points, W, H); ctx.stroke();
   };
-  for (const s of (S.strokes.get(c.id) || new Map()).values()) draw(s);
+  for (const s of (S.strokes.get(c.id) || new Map()).values()) if (!s.piece) draw(s);
   for (const d of S.drafts.values()) if (d.scene === c.id && d.points.length >= 2) draw(d);
   if (c.cur) draw(c.cur);
+  renderTokens(c);
 }
 function redrawScene(id) { const c = canvases.get(id); if (c) redraw(c); }
 
@@ -2285,8 +2582,13 @@ function eraseAt(c, e) {
   const m = S.strokes.get(c.id);
   if (!m) return;
   let hit = false;
+  const tr = tokenPx(r.width) / 2;
   for (const [id, s] of m) {
     const p = s.points;
+    if (s.piece) {
+      if (Math.hypot(px - p[0] * r.width, py - p[1] * r.height) < tr + R / 2) { c.erase.add(id); m.delete(id); hit = true; }
+      continue;
+    }
     if (s.text) {
       const b = textBox(s, r.width, r.height);
       if (px > b.x0 - R && px < b.x0 + b.w + R && py > b.y0 - R && py < b.y0 + b.h + R) { c.erase.add(id); m.delete(id); hit = true; }
@@ -2305,6 +2607,118 @@ function segDist(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
   const t = L ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / L)) : 0;
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+// ── Tokens ────────────────────────────────────────────────────────────────
+// A token is a stroke with a `piece` ('gm', 'sheet:<id>', 'npc:<label>') at
+// [x, y]. They sit on a DOM layer above the drawing so portraits stay crisp;
+// the layer ignores the pointer and hits are worked out here.
+
+const tokenPx = boxW => Math.round(Math.max(26, Math.min(58, boxW * 0.05)));
+function myPiece() {
+  const p = S.tokenPick;
+  if (p === 'gm' || p === 'npc') return p;
+  if (p && p.startsWith('sheet:') && S.sheets.has(p.slice(6))) return p;
+  return mine() ? 'sheet:' + mine() : 'gm';
+}
+function initials(name) {
+  const w = String(name || '?').trim().split(/\s+/).filter(Boolean);
+  return ((w[0] || '?').charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : '')).toUpperCase();
+}
+function tokenInfo(st) {
+  const piece = st.piece || '';
+  if (piece === 'gm') return { name: 'GM', color: st.color || GM_COLOR, mark: 'GM', gm: true };
+  if (piece.startsWith('npc:')) { const n = piece.slice(4); return { name: n, color: '#b8463a', mark: initials(n), npc: true }; }
+  const rec = S.sheets.get(piece.slice(6));
+  if (!rec) return { name: 'Gone', color: '#6c777b', mark: '?' };
+  return { name: rec.data.name || 'Unnamed', color: accentOf(rec), mark: (rec.data.name || '?').trim().charAt(0).toUpperCase(), portrait: rec.data.portrait };
+}
+function tokPickHTML() {
+  const cur = myPiece();
+  const btn = (piece, face, label) => `<button class="tokpick ${cur === piece ? 'on' : ''}" data-tokpick="${esc(piece)}" role="radio" aria-checked="${cur === piece}" title="${esc(label)}" aria-label="${esc(label)}">${face}</button>`;
+  return orderedSheets().map(r => btn('sheet:' + r.id, avatarHTML(r, 'xs'), 'Token: ' + (r.data.name || 'Unnamed'))).join('')
+    + btn('gm', '<span class="avatar xs gm-av">GM</span>', 'Token: GM')
+    + btn('npc', '<span class="avatar xs npc-av">NPC</span>', 'Token: an NPC (type a name)')
+    + `<input class="npc-name ${cur === 'npc' ? '' : 'hide'}" maxlength="16" placeholder="NPC name, then click" value="${esc(S.npcName)}" aria-label="NPC name">`;
+}
+function refreshTokPickers() {
+  document.querySelectorAll('.tokpicks').forEach(el => {
+    if (el.contains(document.activeElement)) {   // don't steal the NPC name box while typing
+      el.querySelectorAll('.tokpick').forEach(b => { const on = b.dataset.tokpick === myPiece(); b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+      el.querySelector('.npc-name').classList.toggle('hide', myPiece() !== 'npc');
+      return;
+    }
+    el.innerHTML = tokPickHTML();
+  });
+}
+document.addEventListener('input', e => {
+  if (!e.target.classList || !e.target.classList.contains('npc-name')) return;
+  S.npcName = e.target.value;
+  document.querySelectorAll('.npc-name').forEach(i => { if (i !== e.target) i.value = S.npcName; });
+});
+document.addEventListener('keydown', e => {
+  if (e.target.classList && e.target.classList.contains('npc-name')) { e.stopPropagation(); if (e.key === 'Enter' || e.key === 'Escape') e.target.blur(); }
+}, true);
+
+async function placeToken(c, x, y) {
+  let piece = myPiece();
+  if (piece === 'npc') {
+    const n = S.npcName.trim();
+    if (!n) { toast('Type the NPC’s name first, then click the board.', true); const i = c.el.querySelector('.npc-name'); if (i) i.focus({ preventScroll: true }); return; }
+    piece = 'npc:' + n.slice(0, 16);
+  }
+  // Show it straight away: a character's token jumps to the new spot.
+  const m = S.strokes.get(c.id) || new Map(); S.strokes.set(c.id, m);
+  const prev = piece.startsWith('npc:') ? null : [...m.values()].find(s => s.piece === piece);
+  const temp = prev || { id: 'tmp-' + uid(), scene_id: c.id, piece, color: myColor(), points: [x, y] };
+  const was = prev && prev.points;
+  temp.points = [x, y];
+  if (!prev) m.set(temp.id, temp);
+  redraw(c);
+  try {
+    const st = await api('place_token', { p_scene: c.id, p_piece: piece, p_points: [x, y], p_color: myColor() });
+    if (!prev) m.delete(temp.id);
+    applyStroke(st);
+    redraw(c); ping();
+  } catch (err) {
+    if (prev) prev.points = was; else m.delete(temp.id);
+    redraw(c); fail(err);
+  }
+}
+
+function hitToken(c, e) {
+  const r = c.box.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top, R = tokenPx(r.width) / 2 + 3;
+  let hit = null;
+  for (const s of (S.strokes.get(c.id) || new Map()).values()) {
+    if (s.piece && !String(s.id).startsWith('tmp-') && Math.hypot(px - s.points[0] * r.width, py - s.points[1] * r.height) < R) hit = s;
+  }
+  return hit;
+}
+
+function renderTokens(c) {
+  const layer = c.box.querySelector('.tokens');
+  if (!layer) return;
+  const size = tokenPx(c.box.clientWidth || 900);
+  layer.style.setProperty('--tok', size + 'px');
+  const seen = new Set();
+  for (const s of (S.strokes.get(c.id) || new Map()).values()) {
+    if (!s.piece) continue;
+    seen.add(s.id);
+    const t = tokenInfo(s);
+    const sig = [t.name, t.color, t.mark, t.portrait ? t.portrait.length + t.portrait.slice(-24) : ''].join('|');
+    let el = c.tokEls.get(s.id);
+    if (!el) { el = document.createElement('div'); el.className = 'token'; layer.appendChild(el); c.tokEls.set(s.id, el); }
+    if (el.dataset.sig !== sig) {
+      el.dataset.sig = sig;
+      el.classList.toggle('npc', !!t.npc); el.classList.toggle('gm', !!t.gm);
+      el.style.setProperty('--c', t.color);
+      el.innerHTML = `<span class="tok-face" style="${t.portrait ? `background-image:url('${esc(t.portrait)}')` : ''}">${t.portrait ? '' : esc(t.mark)}</span><span class="tok-name">${esc(t.name)}</span>`;
+    }
+    el.classList.toggle('dragging', !!(c.drag && c.drag.id === s.id));
+    el.style.left = (s.points[0] * 100) + '%';
+    el.style.top = (s.points[1] * 100) + '%';
+  }
+  for (const [id, el] of c.tokEls) if (!seen.has(id)) { el.remove(); c.tokEls.delete(id); }
 }
 
 function showLocPing(p) {
@@ -3132,10 +3546,16 @@ document.addEventListener('click', async e => {
       break;
     }
 
+    // GM dice stats
+    case 'stats-refresh': loadStats(); break;
+    case 'stats-range': S.stats.range = el.dataset.v; rerenderStats(); break;
+    case 'stats-sort': S.stats.sort = el.dataset.v; rerenderStats(); break;
+    case 'stats-sel': S.stats.sel = el.dataset.v; rerenderStats(); break;
+
     // GM
     case 'gm-clear': {
-      if (!confirm('Clear the dice log for everyone?')) break;
-      try { await api('gm_clear_rolls'); S.rolls.clear(); ping(); renderLog(); toast('Dice log cleared.'); } catch (err) { fail(err); }
+      if (!confirm('Clear the dice log for everyone? Dice stats keep counting these rolls.')) break;
+      try { await api('gm_clear_rolls'); S.rolls.clear(); ping(); renderLog(); toast('Dice log cleared. Stats kept.'); } catch (err) { fail(err); }
       break;
     }
     case 'gm-restore': {
