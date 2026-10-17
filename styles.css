@@ -1312,3 +1312,102 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
   .die.settle .pp { display: none; } .die.settle .num { opacity: 1; animation: none; }
   .die.settle-n, .entry.dbl-land, .tag.pulse { animation: none; } .dbl-stamp { display: none; }
 }
+
+/* ══ v13: login extras ═════════════════════════════════════════════════════ */
+
+/* Neon sign: warm amber tubes that sputter now and then. */
+.login-brand h1.neon { color: #fff3d6; letter-spacing: .16em;
+  text-shadow: 0 0 2px #fff, 0 0 8px #ffd27a, 0 0 18px #f5a623, 0 0 36px #e0861a, 0 0 70px rgba(224,134,26,.55); }
+.neon .tube { display: inline-block; transition: color .05s, text-shadow .05s; }
+.neon .tube.flick { animation: tube-flick .7s steps(1) both; }
+.neon.blackout .tube { animation: none; color: #3a3226; text-shadow: 0 1px 0 #0a0d0f; }
+@keyframes tube-flick {
+  0%, 18%, 40%, 62%, 100% { color: #fff3d6; text-shadow: 0 0 2px #fff, 0 0 8px #ffd27a, 0 0 18px #f5a623, 0 0 36px #e0861a, 0 0 70px rgba(224,134,26,.55); }
+  10%, 30%, 52% { color: #4a3e2a; text-shadow: 0 1px 0 #0a0d0f; }
+}
+.login-brand .logo-die { box-shadow: 0 0 40px rgba(245,166,35,.4), inset 0 -3px 0 rgba(0,0,0,.25); }
+
+/* Live status on the ID cards. */
+.ct-status { min-height: 15px; }
+.ct-dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; border: 1.5px solid #6c777b; flex: none; }
+.ct-status.online { color: #b9dca6; } .ct-status.online .ct-dot { background: #7fb069; border-color: #7fb069; box-shadow: 0 0 0 0 rgba(127,176,105,.6); animation: live-ping 2s infinite; }
+.ct-status.away { color: #e8cf8f; } .ct-status.away .ct-dot { background: #e0a458; border-color: #e0a458; }
+@keyframes live-ping { 0% { box-shadow: 0 0 0 0 rgba(127,176,105,.55); } 70%, 100% { box-shadow: 0 0 0 7px rgba(127,176,105,0); } }
+.crew-tile.is-online { border-top-color: var(--accent); }
+.crew-tile.is-online .ct-photo::before { content: ''; position: absolute; top: 8px; left: 8px; z-index: 1; width: 10px; height: 10px; border-radius: 50%;
+  background: #7fb069; box-shadow: 0 0 0 2px #11161a; }
+.gm-here { font-style: normal; color: #b9dca6; letter-spacing: .12em; }
+.gm-here.away { color: #e8cf8f; }
+
+/* The GM's desk: a wood desk under a banker's lamp. */
+.gm-card.gm-desk { grid-template-columns: auto minmax(0, 1fr) auto auto; padding: 16px 22px 14px;
+  background:
+    radial-gradient(ellipse 38% 90% at 72% 100%, rgba(255,214,140,.22), transparent 70%),
+    repeating-linear-gradient(91deg, rgba(0,0,0,.10) 0 1px, transparent 1px 7px, rgba(255,255,255,.025) 7px 8px, transparent 8px 15px),
+    linear-gradient(115deg, #4a2c17 0%, #351f11 45%, #26170d 100%); }
+.gm-desk .gm-copy span { color: #c9b89a; }
+.desk-props { width: 220px; height: 105px; margin: -8px -6px -14px 0; overflow: visible; }
+.desk-props .lamp-cone { animation: lamp-hum 6s infinite; }
+.desk-props .ember { animation: ember 2.4s ease-in-out infinite; }
+.desk-props .smoke path { stroke-width: 2.2; opacity: 0; stroke-dasharray: 90; stroke-dashoffset: 90; animation: smoke 5s ease-out infinite; }
+.desk-props .smoke path:nth-child(2) { animation-delay: 1.7s; stroke-width: 1.6; }
+.desk-props .smoke path:nth-child(3) { animation-delay: 3.3s; stroke-width: 1.4; }
+@keyframes smoke { 0% { opacity: 0; stroke-dashoffset: 90; transform: translateY(4px); } 20% { opacity: .45; } 100% { opacity: 0; stroke-dashoffset: 0; transform: translateY(-14px) translateX(3px); } }
+@keyframes ember { 50% { fill: #ffb15e; filter: drop-shadow(0 0 3px #ff7a2e); } }
+@keyframes lamp-hum { 0%, 46%, 50%, 100% { opacity: 1; } 48% { opacity: .82; } }
+.gm-desk:hover .desk-props .ember { animation-duration: .9s; }
+
+/* Wrong password: a little vault dial clunks next to Enter. */
+.mini-dial { width: 40px; height: 40px; flex: none; border-radius: 50%; align-self: center; position: relative;
+  background: repeating-conic-gradient(from 0deg, #2b3338 0 8deg, #3b464c 8deg 10deg), #2b3338; border: 2px solid var(--brass); box-shadow: inset 0 0 0 4px #1d2428; }
+.mini-dial i { position: absolute; left: 50%; top: 4px; width: 2px; height: 9px; margin-left: -1px; background: var(--brass); border-radius: 1px; }
+.mini-dial::after { content: ''; position: absolute; inset: 11px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #f6dc98, #c9a24b 60%, #84651f); }
+.mini-dial.spin { animation: dial-spin .9s cubic-bezier(.4,0,.2,1) infinite; }
+.mini-dial.wrong { animation: dial-clunk .45s ease-out; border-color: #c0392b; }
+@keyframes dial-spin { 0% { transform: rotate(0); } 50% { transform: rotate(250deg); } 100% { transform: rotate(130deg); } }
+@keyframes dial-clunk { 0% { transform: rotate(40deg); } 30% { transform: rotate(-25deg); } 55% { transform: rotate(12deg); } 80% { transform: rotate(-5deg); } 100% { transform: none; } }
+
+/* Vault door on a good password. */
+.vault { position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+  background: radial-gradient(ellipse at 50% 45%, #2a3338 0%, #12171a 60%, #0a0d0f 100%); perspective: 1400px; cursor: pointer; transition: background .5s, opacity .5s; }
+.vault.open { background: radial-gradient(ellipse at 50% 45%, rgba(42,51,56,.0), rgba(10,13,15,.0)); }
+.vault.gone { opacity: 0; pointer-events: none; }
+.vault-frame { --d: min(64vmin, 440px); width: calc(var(--d) + 28px); height: calc(var(--d) + 28px); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, #050708 60%, #1c2226 61%, #2f393f 70%, #161b1e 72%); box-shadow: 0 0 0 3px #3a464d, 0 30px 60px rgba(0,0,0,.6); transition: opacity .4s .6s; }
+.vault.open .vault-frame { opacity: 0; }
+.vault-door { position: relative; width: var(--d); height: var(--d); border-radius: 50%; transform-origin: 0% 50%; transition: transform .9s cubic-bezier(.5,0,.3,1);
+  background: radial-gradient(circle at 38% 32%, #56636a 0%, #3a464d 38%, #262f34 70%, #1a2023 100%);
+  box-shadow: inset 0 0 0 10px #2b3338, inset 0 0 0 13px #c9a24b55, inset 0 0 0 26px #222a2e, inset 0 -18px 40px rgba(0,0,0,.45), 0 0 0 2px #0b0e10; }
+.vault.open .vault-door { transform: rotateY(-108deg); }
+.vault-ring { position: absolute; inset: 22%; border-radius: 50%; border: 2px solid rgba(201,162,75,.35); box-shadow: 0 0 0 10px rgba(0,0,0,.12); }
+.bolt { position: absolute; left: 50%; top: 50%; width: 30px; height: 16px; margin: -8px 0 0 -15px; border-radius: 4px;
+  background: linear-gradient(180deg, #d9b860, #8a6d2c); box-shadow: 0 2px 4px rgba(0,0,0,.5);
+  transform: rotate(var(--a)) translateX(calc(var(--d) / 2 - 22px)); transition: transform .35s ease-in .95s; }
+.vault.go .bolt { transform: rotate(var(--a)) translateX(calc(var(--d) / 2 - 52px)); }
+.vault-dial { position: absolute; inset: 31%; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: repeating-conic-gradient(from 0deg, #2b3338 0 4deg, #c9a24b 4deg 5deg, #2b3338 5deg 10deg), #2b3338; box-shadow: 0 0 0 6px #1d2428, 0 0 0 8px #c9a24b, 0 8px 18px rgba(0,0,0,.5); }
+.vault-dial b { position: absolute; top: -18px; left: 50%; margin-left: -7px; border: 7px solid transparent; border-top: 11px solid #c0392b; }
+.vault-wheel { position: absolute; inset: 14%; border-radius: 50%; background: radial-gradient(circle, #f6dc98 0 16%, #c9a24b 17% 22%, transparent 23%); transition: transform .9s cubic-bezier(.4,0,.2,1); }
+.vault-wheel i { position: absolute; left: 50%; top: 50%; width: 46%; height: 9px; margin-top: -4.5px; border-radius: 5px; transform-origin: 0 50%;
+  background: linear-gradient(180deg, #e6c56d, #8a6d2c); box-shadow: 0 2px 3px rgba(0,0,0,.4); }
+.vault-wheel i:nth-child(1) { transform: rotate(-90deg); } .vault-wheel i:nth-child(2) { transform: rotate(30deg); } .vault-wheel i:nth-child(3) { transform: rotate(150deg); }
+.vault-wheel i::after { content: ''; position: absolute; right: -6px; top: -4px; width: 16px; height: 16px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #f6dc98, #a9852f); }
+.vault.go .vault-wheel { transform: rotate(-540deg); }
+.vault-dial::before { content: ''; position: absolute; inset: 0; border-radius: 50%; transition: transform 1s cubic-bezier(.4,0,.2,1);
+  background: repeating-conic-gradient(from 0deg, transparent 0 9deg, rgba(255,255,255,.06) 9deg 10deg); }
+.vault.go .vault-dial::before { transform: rotate(320deg); }
+.vault-plate { position: absolute; left: 50%; bottom: 11%; transform: translateX(-50%); white-space: nowrap; font-family: var(--slab); font-size: clamp(9px, 1.8vmin, 13px); letter-spacing: .2em;
+  color: #1b1f22; background: linear-gradient(180deg, #e6c56d, #a9852f); padding: 3px 10px; border-radius: 3px; box-shadow: 0 2px 4px rgba(0,0,0,.4); }
+.vault-hello { margin: 0; font-size: 15px; color: var(--dim); letter-spacing: .08em; opacity: 0; animation: tile-in .5s .3s forwards; transition: opacity .3s .5s; }
+.vault-hello b { color: var(--brass); font-family: var(--slab); font-weight: 400; letter-spacing: .04em; }
+.vault.open .vault-hello { opacity: 1; animation: hello-out .35s forwards; }
+@keyframes hello-out { to { opacity: 0; transform: translateY(-6px); } }
+
+@media (max-width: 760px) {
+  .gm-card.gm-desk { grid-template-columns: auto minmax(0, 1fr); }
+  .desk-props { grid-column: 1 / -1; justify-self: center; width: 200px; height: 90px; margin: -4px 0 -6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .neon .tube.flick { animation: none; }
+  .desk-props .smoke path, .desk-props .ember, .desk-props .lamp-cone, .ct-status.online .ct-dot { animation: none; }
+}

@@ -363,10 +363,10 @@ function connectRealtime() {
       st.points = p.points;
       redrawScene(p.scene);
     });
-    channel.on('presence', { event: 'sync' }, () => { S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); });
+    channel.on('presence', { event: 'sync' }, () => { S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); renderLoginStatus(); });
     channel.subscribe(status => {
       S.rtLive = status === 'SUBSCRIBED';
-      if (S.rtLive) trackPresence();
+      if (S.rtLive) { if (S.me) trackPresence(); else trackViewer(); }
       renderOnline();
     });
   } catch { channel = null; /* polling still works */ }
@@ -379,6 +379,12 @@ const TAB_ID = Math.random().toString(36).slice(2, 12);
 function trackPresence() {
   if (!channel || !S.rtLive || !S.me) return;
   try { channel.track({ role: S.me.role, sheet_id: S.me.sheet_id || null, away: document.hidden }); } catch { /* not joined yet */ }
+}
+// The login page has to track something to be sent presence at all. A viewer
+// has no role or character, so presenceMap() skips it and no one sees it.
+function trackViewer() {
+  if (!channel || !S.rtLive || S.me || !$('.login')) return;
+  try { channel.track({ role: 'viewer' }); } catch { /* ignore */ }
 }
 function untrackPresence() { try { if (channel) channel.untrack(); } catch { /* ignore */ } }
 
@@ -959,9 +965,100 @@ const app = $('#app');
 const KEY_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3"/><path d="m16 7 3 3"/><path d="m14 9 2 2"/></svg>';
 const LOCK_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 
+// ── Login page extras: neon sign, live status, GM's desk, vault door ──────
+
+// Each letter is its own tube so one can sputter while the rest stay lit.
+function neonHTML() {
+  return `<h1 class="neon" aria-label="Debt">${'DEBT'.split('').map((c, i) => `<span class="tube" style="--n:${i}" aria-hidden="true">${c}</span>`).join('')}</h1>`;
+}
+let neonTimer = null;
+function startNeon() {
+  clearTimeout(neonTimer);
+  if (reducedMotion()) return;
+  const tick = () => {
+    const h = $('.login .neon');
+    if (!h) return;                       // left the login page
+    const tubes = h.querySelectorAll('.tube');
+    if (Math.random() < 0.12) {           // now and then the whole sign drops out
+      h.classList.add('blackout');
+      setTimeout(() => h.classList.remove('blackout'), 500 + Math.random() * 500);
+    } else {
+      const t = tubes[Math.floor(Math.random() * tubes.length)];
+      t.classList.remove('flick'); void t.offsetWidth; t.classList.add('flick');
+      if (Math.random() < 0.3) setTimeout(() => { t.classList.remove('flick'); void t.offsetWidth; t.classList.add('flick'); }, 260);
+    }
+    neonTimer = setTimeout(tick, 2500 + Math.random() * 5500);
+  };
+  neonTimer = setTimeout(tick, 1600);
+}
+
+// Who's on right now, shown on the login tiles (same presence as the top bar).
+function renderLoginStatus() {
+  if (!$('.login')) return;
+  const pm = presenceMap();
+  document.querySelectorAll('.login [data-status-for]').forEach(el => {
+    const id = el.dataset.statusFor, st = pm.get(id) || 'offline';
+    if (id === 'gm') { el.hidden = st === 'offline'; el.classList.toggle('away', st === 'away'); el.textContent = st === 'away' ? '· GM is away' : '· GM is in'; return; }
+    if (!el.querySelector('.ct-dot')) return;   // no password yet
+    el.className = 'ct-status ' + st;
+    el.querySelector('span').textContent = STATUS_LABEL[st] || 'Offline';
+    const tile = el.closest('.crew-tile');
+    if (tile) tile.classList.toggle('is-online', st === 'online');
+  });
+}
+
+// The GM's desk: banker's lamp, open ledger, a cigar going in the ashtray.
+const DESK_SVG = `<svg class="desk-props" viewBox="0 0 230 110" aria-hidden="true">
+  <defs>
+    <linearGradient id="dk-cone" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe2a0" stop-opacity=".55"/><stop offset="1" stop-color="#ffe2a0" stop-opacity="0"/></linearGradient>
+    <linearGradient id="dk-shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3f8a5a"/><stop offset="1" stop-color="#1d4a2f"/></linearGradient>
+  </defs>
+  <polygon class="lamp-cone" points="42,40 92,40 120,100 10,100" fill="url(#dk-cone)"/>
+  <rect x="62" y="40" width="10" height="44" fill="#a9852f"/>
+  <ellipse cx="67" cy="96" rx="26" ry="6" fill="#7d6122"/><ellipse cx="67" cy="93" rx="24" ry="5" fill="#c9a24b"/>
+  <path d="M34 40 Q67 14 100 40 Z" fill="url(#dk-shade)" stroke="#10301e" stroke-width="1.5"/>
+  <rect x="34" y="38.5" width="66" height="3" rx="1.5" fill="#c9a24b"/>
+  <g class="ledger"><path d="M92 88 L132 80 L172 88 L172 100 L132 93 L92 100 Z" fill="#5b2a1e"/>
+    <path d="M95 86 L132 79 L132 92 L95 98 Z" fill="#efe6cc"/><path d="M132 79 L169 86 L169 98 L132 92 Z" fill="#e2d8bb"/>
+    <path d="M100 88 L127 83 M100 91 L127 86 M100 94 L122 90 M137 83 L164 88 M137 86 L164 91 M137 89 L158 93" stroke="#9b8a62" stroke-width=".8"/></g>
+  <ellipse cx="200" cy="98" rx="20" ry="6" fill="#1a1d1f" stroke="#3a3f42"/>
+  <rect x="180" y="91" width="30" height="5" rx="2.5" fill="#6b4226" transform="rotate(-8 195 93)"/>
+  <circle class="ember" cx="209" cy="90.5" r="2.6" fill="#ff7a2e"/>
+  <g class="smoke" fill="none" stroke="#cfc8b8" stroke-linecap="round">
+    <path d="M210 86 C204 76 216 70 209 58 C203 48 214 42 208 30"/>
+    <path d="M211 86 C218 74 206 66 213 54 C219 44 209 36 214 24"/>
+    <path d="M209 86 C214 78 205 70 210 62"/>
+  </g>
+  <g class="desk-dice"><rect x="150" y="66" width="12" height="12" rx="2.5" fill="#e6dfcb" transform="rotate(-14 156 72)"/><circle cx="153" cy="70" r="1.3" fill="#1b1f22"/><circle cx="158.5" cy="74.5" r="1.3" fill="#1b1f22"/></g>
+</svg>`;
+
+// Right password: the vault door spins its dial, pulls its bolts and swings open
+// while the portal loads behind it. Click to skip.
+function vaultDoor(name) {
+  if (reducedMotion()) return;
+  const v = document.createElement('div');
+  v.className = 'vault';
+  v.innerHTML = `
+    <div class="vault-frame">
+      <div class="vault-door">
+        ${Array.from({ length: 8 }, (_, i) => `<i class="bolt" style="--a:${i * 45 + 22.5}deg"></i>`).join('')}
+        <div class="vault-ring"></div>
+        <div class="vault-dial"><div class="vault-wheel"><i></i><i></i><i></i></div><b></b></div>
+        <span class="vault-plate">DEBT · CREW VAULT</span>
+      </div>
+    </div>
+    <p class="vault-hello">Welcome back, <b>${esc(name)}</b></p>`;
+  document.body.appendChild(v);
+  const done = () => { v.classList.add('gone'); setTimeout(() => v.remove(), 500); };
+  v.addEventListener('click', done);
+  requestAnimationFrame(() => v.classList.add('go'));
+  setTimeout(() => v.classList.add('open'), 1500);
+  setTimeout(done, 2500);
+}
+
 async function renderLogin(msg) {
   clearInterval(pollTimer);
-  app.innerHTML = `<div class="login"><div class="login-inner"><header class="login-brand"><div class="logo-die"><i></i><i></i><i></i></div><h1>DEBT</h1><p>Loading the crew…</p></header></div></div>`;
+  app.innerHTML = `<div class="login"><div class="login-inner"><header class="login-brand"><div class="logo-die"><i></i><i></i><i></i></div>${neonHTML()}<p>Loading the crew…</p></header></div></div>`;
   let options = [];
   try { options = await rpc('login_options'); }
   catch { app.querySelector('.login-brand p').textContent = 'Couldn’t reach the server. Refresh to try again.'; return; }
@@ -973,7 +1070,7 @@ async function renderLogin(msg) {
         <span class="ct-photo" style="${o.portrait ? `background-image:url('${esc(o.portrait)}')` : ''}">${o.portrait ? '' : `<b>${esc((o.name || '?').charAt(0).toUpperCase())}</b>`}</span>
         <span class="ct-plate">
           <b class="ct-name">${esc(o.name || 'Unnamed')}</b>
-          <small>${o.ready ? 'Ready' : `${LOCK_SM} No password yet`}</small>
+          <small class="ct-status" data-status-for="${o.id}">${o.ready ? '<i class="ct-dot"></i><span>Offline</span>' : `${LOCK_SM} No password yet`}</small>
         </span>
       </button>`;
   }).join('');
@@ -983,17 +1080,18 @@ async function renderLogin(msg) {
       <div class="login-inner">
         <header class="login-brand">
           <div class="logo-die"><i></i><i></i><i></i></div>
-          <h1>DEBT</h1>
+          ${neonHTML()}
           <p>Crew portal</p>
         </header>
 
-        <button type="button" class="gm-card" data-pick="gm" aria-pressed="false">
+        <button type="button" class="gm-card gm-desk" data-pick="gm" aria-pressed="false">
           <span class="gm-seal">${KEY_SVG}</span>
           <span class="gm-copy">
-            <small>Running the table?</small>
+            <small>Running the table? <i class="gm-here" data-status-for="gm" hidden>· GM is in</i></small>
             <b>Game Master</b>
             <span>Scenes, rolls, the Vault and every sheet.</span>
           </span>
+          ${DESK_SVG}
           <span class="gm-go">Sign in <i>→</i></span>
         </button>
 
@@ -1007,6 +1105,7 @@ async function renderLogin(msg) {
             <label for="pass" id="pass-label">Password</label>
             <div class="unlock-row">
               <input id="pass" type="password" autocomplete="current-password" placeholder="••••••">
+              <span class="mini-dial" id="mini-dial" aria-hidden="true"><i></i></span>
               <button class="btn brass" type="submit" id="login-btn">Enter</button>
             </div>
           </div>
@@ -1015,6 +1114,11 @@ async function renderLogin(msg) {
         <p class="err login-err" id="login-err" role="alert">${esc(msg || '')}</p>
       </div>
     </div>`;
+
+  startNeon();
+  connectRealtime();      // the login page joins as an anonymous viewer
+  trackViewer();
+  renderLoginStatus();
 
   let picked = null;
   const unlock = $('#login-pass');
@@ -1053,15 +1157,19 @@ async function renderLogin(msg) {
   unlock.onsubmit = async e => {
     e.preventDefault();
     if (!picked) return;
-    const btn = $('#login-btn');
+    const btn = $('#login-btn'), dial = $('#mini-dial');
     btn.disabled = true; btn.textContent = 'Checking…';
+    dial.classList.remove('wrong'); dial.classList.add('spin');
     try {
       const s = await rpc('login', { p_sheet: picked === 'gm' ? null : picked, p_pass: $('#pass').value });
       S.token = s.token; S.me = { role: s.role, sheet_id: s.sheet_id };
       lsSet('debt.token', s.token);
+      const o = options.find(x => x.id === picked);
+      vaultDoor(picked === 'gm' ? 'Game Master' : (o && o.name) || 'crew');
       boot();
     } catch (err) {
       $('#login-err').textContent = err.message === 'bad_login' ? 'That’s not the password.' : 'Couldn’t reach the server. Try again.';
+      dial.classList.remove('spin'); void dial.offsetWidth; dial.classList.add('wrong');
       unlock.classList.remove('shake'); void unlock.offsetWidth; unlock.classList.add('shake');
       btn.disabled = false; btn.textContent = 'Enter';
       $('#pass').select();

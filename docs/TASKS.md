@@ -20,6 +20,13 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 15 (2026-10-18): login page extras
+- [x] Flickering neon sign: "DEBT" is four amber neon tubes; every few seconds one sputters, and about 1 time in 8 the whole sign blacks out for half a second (`startNeon`, stops itself when the login page is gone; off for reduced motion).
+- [x] Live status on the ID cards: Online (pulsing green dot) / Away / Offline under each name, and "· GM is in / away" on the GM card. Uses the same Realtime presence as the top bar. The login page has to track something to receive presence, so it tracks `{ role: 'viewer' }`, which presenceMap() ignores (no one sees it).
+- [x] Vault-door unlock: a small brass dial spins next to Enter while checking and clunks red on a wrong password. A right password shows a full-screen vault door: wheel spins, bolts pull in, the door swings open on its hinge (~2.5 s, click to skip) while the portal loads behind it. "Welcome back, <name>".
+- [x] GM's desk: the GM card is a wood desk under a green banker's lamp with an open ledger, a die and a cigar smoking in an ashtray (inline SVG, `DESK_SVG`). On phones the props sit under the text.
+- Tested locally (throwaway ZZ character with a placeholder hash so it shows as ready, temporary GM and player sessions to drive the dots); all deleted. Deployed `?v=16`.
+
 ## Round 14 (2026-10-18): dice tray
 - [x] Felt dice tray in the dice panel, between the roller and the log. It opens on each new roll, Grit die or Wear reroll (anyone's roll you can see), plays it, then closes. Several at once queue (max 3 waiting; older ones land straight away).
 - [x] New roll: dice tumble in (d6 cubes with pips; d4/d8/d10/d12/d20 shaped, d100 a tile; at most 8 shown). Grit: original dice dim, a brass die rolls in from the right. Wear reroll: old dice swept off, new ones roll in (plus the Grit die when the "Wear rerolls the Grit die too" setting is on).
