@@ -20,6 +20,27 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 5 request (2026-10-17)
+
+### Progress
+- [x] DB migration v5 (supabase/v5.sql): scenes.state, kind 'turns', move_stroke, gm_scene_state
+- [x] Front end v5
+- [x] Tested locally (GM + throwaway player), cleaned up
+- [x] Deployed (`?v=5`)
+
+### Items
+- [x] Select tool on scenes and the board: drag text labels around (text only).
+- [x] Text size picker (5 sizes) when the Text tool is on. Separate from pen width.
+- [x] GM Settings: toggles instead of checkboxes, same layout for every setting, separated rows.
+- [x] Combat rules: apply the user's updated sheet (new Turns panel and action table, revised Dropping text and status effects).
+- [x] Doubles styling: a 1,1 roll is red faces, so the red doubles ring clashed. Doubles now get a distinct ring.
+- [x] Turn Order special scene (like the Vault): GM-only control. Add characters or custom entities (no sheet), initiative numbers, sort, reorder, remove, Next/Prev turn with the current turn highlighted, round counter. Players see it read-only. No drawing or pings.
+
+### Round 5 notes
+- Bug found in testing: the `.draw` wrapper now carries `data-tool`, so `closest('[data-tool]')` swallowed size/width clicks. The lookup is now `.tool[data-tool]`.
+- Doubles = a gold ring with a gap (box-shadow), clear on red 1s and green tops. The Grit die keeps its brass ring with no gap.
+- Turn Order entries: `{ id, name, sheet_id|null, init }`. Characters show their portrait and colour; extras are tagged "extra". The highlight follows the current entity when reordering.
+
 ## Round 4 request (2026-10-17)
 
 Findings:

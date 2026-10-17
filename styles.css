@@ -806,3 +806,56 @@ fieldset:disabled .stat-name, fieldset:disabled .icon-btn { opacity: .5; cursor:
   .gear-item .gear-row .gear-kind { width: 92px; }
   .chat-form select { max-width: 100%; flex-basis: 100%; }
 }
+
+/* ══ v5: move-text tool, text sizes, setting toggles, doubles ring, turn order ═ */
+
+.draw:not([data-tool="pen"]) .pen-only { display: none; }
+.draw:not([data-tool="text"]) .text-only { display: none; }
+.tsizes { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 3px; background: var(--wall); align-items: flex-end; }
+.tsbtn { min-width: 28px; height: 26px; padding: 0 4px; border: 0; border-radius: 2px; background: none; color: var(--dim); font-family: var(--slab); line-height: 1; }
+.tsbtn.on { background: rgba(201,162,75,.18); color: var(--brass); }
+.draw-box[data-tool="select"] { cursor: move; }
+
+/* Settings: one row per setting, text left, toggle right, a rule between rows */
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.setting-row:first-of-type { border-top: 0; padding-top: 2px; }
+.setting-text { display: flex; flex-direction: column; gap: 3px; }
+.setting-text b { font-weight: 400; color: var(--paper); font-size: 14px; }
+.setting-text small { color: var(--dim); font-size: 12px; line-height: 1.35; }
+.switch { position: relative; width: 44px; height: 24px; flex: none; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch i { position: absolute; inset: 0; border-radius: 12px; background: var(--wall); border: 1px solid var(--line); transition: background .15s, border-color .15s; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--dim); transition: transform .15s, background .15s; }
+.switch input:checked + i { background: rgba(127,176,105,.35); border-color: var(--green); }
+.switch input:checked + i::after { transform: translateX(20px); background: #e0f1d6; }
+.switch input:focus-visible + i { outline: 2px solid var(--paper); outline-offset: 2px; }
+
+/* Doubles: a gold ring with a gap, so it never clashes with red 1s or green 6s */
+.die.dbl { box-shadow: 0 0 0 2px var(--steel), 0 0 0 4px #f5c542; }
+
+/* Turn Order */
+.turns { width: 100%; align-self: flex-start; padding: 12px; display: grid; gap: 10px; }
+.turn-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.turn-round { font-family: var(--slab); color: var(--brass); font-size: 18px; letter-spacing: .03em; }
+.turn-now { color: var(--dim); }
+.turn-now b { color: var(--paper); font-weight: 400; }
+.turn-ctrl { gap: 6px; }
+.turn-list { display: grid; gap: 6px; }
+.turn-row {
+  display: grid; grid-template-columns: 28px 30px minmax(0, 1fr) auto auto; gap: 10px; align-items: center;
+  padding: 7px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 3px; background: rgba(0,0,0,.18);
+}
+.turn-row.current { background: linear-gradient(90deg, rgba(201,162,75,.28), rgba(201,162,75,.06)); border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass), 0 0 18px rgba(201,162,75,.25); }
+.turn-pos { font-family: var(--slab); text-align: center; color: var(--dim); }
+.turn-row.current .turn-pos { color: var(--brass); }
+.turn-name { font-family: var(--slab); letter-spacing: .03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-name small { font-family: var(--type); font-size: 10.5px; letter-spacing: 0; }
+.turn-init { width: 64px !important; text-align: center; }
+.turn-init-ro { min-width: 34px; text-align: center; font-family: var(--slab); color: var(--dim); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; }
+.turn-row:not(:has(.turn-init)):not(:has(.turn-init-ro)) { grid-template-columns: 28px 30px minmax(0, 1fr) auto; }
+.turn-add { display: grid; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.turn-add form { flex-wrap: nowrap; }
+.turn-add select, .turn-add input { flex: 1; min-width: 0; }
+.turn-add .btn.danger { justify-self: start; }
+.turns-thumb { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 12px 16px; font-size: 13px; background: #0f1417; }
+.scene-body .turns-host { width: 100%; overflow-y: auto; align-self: stretch; }

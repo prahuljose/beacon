@@ -50,6 +50,8 @@ const PALETTE = ['#c9a24b', '#5fa8d3', '#d9776b', '#8fbf6a', '#b48ad6', '#e0a458
 const DICE_TYPES = [4, 6, 8, 10, 12, 20, 100];
 const WEAPON_DIE = [2, 3, 4, 5, 6, 7, 8, 9, 10];
 const PEN_WIDTHS = [2, 3, 5, 8, 13];
+// Text sizes (stored in the stroke's width field; see textPx).
+const TEXT_SIZES = [[2, 'S'], [5, 'M'], [8, 'L'], [13, 'XL'], [20, 'XXL']];
 
 const PANELS = {
   identity: 'Identity', look: 'Appearance', money: 'Money', gear: 'Gear', kit: 'Kit',
@@ -211,6 +213,7 @@ const S = {
   chatPrivate: false,    // player: send privately to the GM
   chatTo: '',            // GM: '' = everyone, or a character id for a private message
   penWidth: +lsGet('debt.pen') || 3,
+  textSize: +lsGet('debt.textsize') || 5,
   gmColor: lsGet('debt.gmcolor') || GM_COLOR,
   rulesTab: 'crew',
   gmSessions: null,
@@ -450,7 +453,8 @@ async function loadStrokes(sceneId) {
 async function loadScenes() {
   try {
     S.scenes = await api('gm_scenes');
-    if (S.route.view === 'scenes') renderMain();
+    if (S.route.view === 'scenes') refreshMain(new Set(), true);
+    renderTurnsViews();
   } catch (err) { fail(err); }
 }
 
@@ -774,7 +778,7 @@ function renderMain() {
   if (r.view === 'sheet' && S.sheets.has(r.id)) main.innerHTML = sheetHTML(S.sheets.get(r.id));
   else if (r.view === 'rules') main.innerHTML = rulesHTML();
   else if (r.view === 'gm' && isGM()) { main.innerHTML = gmHTML(); if (S.gmNotes === null) loadGM(); }
-  else if (r.view === 'scenes' && isGM()) main.innerHTML = scenesHTML();
+  else if (r.view === 'scenes' && isGM()) { main.innerHTML = scenesHTML(); renderTurnsViews(); }
   else { main.innerHTML = crewHTML(); mountBoard(); renderChat(true); }
   S.deferRender = false;
 
@@ -1412,15 +1416,21 @@ const COMBAT_ARMOR = [
   ['Kevlar vest', 2, '4 hits'], ['Ballistic plate', 3, '6 hits'],
 ];
 const COMBAT_STATUS = [
-  ['Bleed', 'Lose 1 HP at the start of each turn until bandaged.', 'Stopped by: bandages or healing'],
-  ['Knockdown', 'Fall prone. Lose your next turn standing up.', 'Resist: 2d6 + Strength'],
-  ['Disarm', 'Drop your weapon.', 'Resist: 2d6 + Strength'],
-  ['Pinned', 'Can’t move. Can still act, but can’t leave.', 'Resist: 2d6 + Strength'],
-  ['Silenced', 'Can’t call for help. Can’t shout.', 'Resist: 2d6 + Strength'],
-  ['Deafened', 'Can’t hear. Miss verbal cues. Can’t coordinate.', 'Resist: 2d6 + Composure'],
-  ['Shaken', '−1 to your next roll.', 'Resist: 2d6 + Composure'],
-  ['Stunned', 'Lose your next turn.', 'Resist: 2d6 + Composure'],
-  ['Blinded', 'Can’t see for one round. −2 to all rolls.', 'Resist: 2d6 + Composure'],
+  ['Bleed', 'Lose 2 HP at the start of each turn until bandaged. Bandaging takes 1 action, and anyone can do it.', 'Stopped by: bandages or healing'],
+  ['Knockdown', 'Fall prone. Standing up costs 1 action.', 'Resist: 2d6 + Dexterity or Strength'],
+  ['Disarm', 'Drop your weapon. Picking it up costs 1 action, or is free if you roll Dexterity 8+.', 'Resist: 2d6 + Dexterity or Strength'],
+  ['Pinned', 'Can’t move. Can still act, but can’t leave. Each turn you can spend 1 action to try to break free.', 'Resist: 2d6 + Dexterity or Strength'],
+  ['Silenced', 'Can’t call for help. Can’t shout. Each turn you can spend 1 action to try to break free.', 'Resist: 2d6 + Dexterity or Strength'],
+  ['Deafened', 'Can’t hear. Miss verbal cues. Can’t coordinate. −2 to Wits or Composure rolls for one round.', 'Resist: 2d6 + Wits or Composure'],
+  ['Shaken', '−2 to your next roll.', 'Resist: 2d6 + Wits or Composure'],
+  ['Stunned', 'Lose 1 action on your next turn, and −2 to your next roll.', 'Resist: 2d6 + Wits or Composure'],
+  ['Blinded', 'Can’t see for one round. −2 to all rolls.', 'Resist: 2d6 + Wits or Composure'],
+];
+const COMBAT_ACTIONS = [
+  ['Attack', 'Hit someone (only one attack per turn)'],
+  ['Move', 'Cross a room, reach cover, climb a ladder'],
+  ['Help', 'Bandage someone, use painkillers or adrenaline, shove, pick a lock'],
+  ['Stand or recover', 'Stand up, pick up a dropped weapon'],
 ];
 
 function combatRulesHTML() {
@@ -1434,17 +1444,17 @@ function combatRulesHTML() {
       <div class="grid combat">
         <div class="s6" style="display:grid;gap:16px;align-content:start">
           <section class="panel">
-            <h2>Attacking</h2>
-            <p>When you attack, roll 2d6 plus a stat.</p>
-            <p><span class="hl">Dexterity</span> for aimed weapons: pistol, shotgun, taser, pepper spray, knife.</p>
-            <p><span class="hl">Strength</span> for swung weapons and fists: punch, kick, bat, brass knuckles, baton.</p>
-            <h3>When you hit, choose one</h3>
-            <p><span class="hl">Damage.</span> Roll damage. They take it. Armor reduces it.</p>
-            <p><span class="hl">Effect.</span> They resist. If they fail, they get the effect. No damage.</p>
+            <h2>Turns</h2>
+            <p><span class="hl">Order.</span> At the start of a fight, everyone rolls 2d6 + Dexterity or Wits. Highest goes first, then down the order, and it stays the same every round. Ties go to the higher modifier, then to the players.</p>
+            <p><span class="hl">Your turn.</span> You get 2 actions. You can spend them on anything, and you can do the same thing twice.</p>
+            <table class="rtable"><thead><tr><th>Action</th><th>Examples</th></tr></thead>
+              <tbody>${COMBAT_ACTIONS.map(a => `<tr><td>${a[0]}</td><td>${a[1]}</td></tr>`).join('')}</tbody></table>
+            <p style="margin-top:10px"><span class="hl">Free.</span> Talking, shouting, dropping something, and spending Grit don’t cost an action.</p>
+            <p><span class="hl">Gear.</span> Bandages, painkillers, adrenaline and a medkit each take 1 action in a fight. Outside a fight, a medkit takes a minute.</p>
           </section>
           <section class="panel">
             <h2>HP and dropping to 0</h2>
-            <p>When you hit 0 HP, you drop. You roll 2d6 + Composure.</p>
+            <p>When you hit 0 HP, you don’t act. You drop and roll 2d6 + Composure.</p>
             <div class="tiers">
               <div><b>10+</b><span>You’re stable. You’re out, but you’ll live.</span></div>
               <div><b>7–9</b><span>Mark a success. Roll again next round.</span></div>
@@ -1455,6 +1465,15 @@ function combatRulesHTML() {
           </section>
         </div>
         <div class="s6" style="display:grid;gap:16px;align-content:start">
+          <section class="panel">
+            <h2>Attacking</h2>
+            <p>When you attack, roll 2d6 plus a stat.</p>
+            <p><span class="hl">Dexterity</span> for aimed weapons: pistol, shotgun, taser, pepper spray, knife.</p>
+            <p><span class="hl">Strength</span> for swung weapons and fists: punch, kick, bat, brass knuckles, baton.</p>
+            <h3>When you hit, choose one</h3>
+            <p><span class="hl">Damage.</span> Roll damage. They take it. Armor reduces it.</p>
+            <p><span class="hl">Effect.</span> They resist. If they fail, they get the effect. No damage.</p>
+          </section>
           <section class="panel">
             <h2>Weapons</h2>
             <table class="rtable"><thead><tr><th>Weapon</th><th>Damage</th><th>Effect</th></tr></thead>
@@ -1511,11 +1530,8 @@ function gmHTML() {
         </section>
         <section class="panel s4">
           <h2>Settings</h2>
-          <label class="row setting"><input type="checkbox" data-setting="reroll_grit" ${S.settings.reroll_grit ? 'checked' : ''}>
-            <span>A Wear reroll also rerolls the Grit die on that roll</span></label>
-          <p class="small dim">Off: only the original dice are rerolled and the Grit die stays.</p>
-          <label class="row setting" style="margin-top:10px"><input type="checkbox" data-setting="combat_visible" ${S.settings.combat_visible ? 'checked' : ''}>
-            <span>Show the Combat rules tab to players</span></label>
+          ${settingToggle('reroll_grit', 'Wear rerolls the Grit die too', 'Off: a Wear reroll only rerolls the original dice and the Grit die stays.')}
+          ${settingToggle('combat_visible', 'Show Combat rules to players', 'Off: only you can see the Combat rules tab.')}
         </section>
         <section class="panel s4">
           <h2>Session Grit roll</h2>
@@ -1544,6 +1560,15 @@ function gmHTML() {
         </section>
       </div>
     </div>`;
+}
+
+function settingToggle(key, title, desc) {
+  const on = !!S.settings[key];
+  return `
+    <label class="setting-row">
+      <span class="setting-text"><b>${title}</b><small>${desc}</small></span>
+      <span class="switch"><input type="checkbox" role="switch" data-setting="${key}" ${on ? 'checked' : ''} aria-checked="${on}"><i></i></span>
+    </label>`;
 }
 
 function sortedSessions() {
@@ -1583,6 +1608,8 @@ function scenesHTML() {
   const cards = list.map(sc => {
     const thumb = sc.kind === 'vault'
       ? `<div class="scene-thumb vault-thumb">${vaultMiniHTML()}</div>`
+      : sc.kind === 'turns'
+      ? `<div class="scene-thumb turns-thumb">${normTurns(sc.state).entries.slice(0, 5).map((e, i) => `<span>${i + 1}. ${esc(e.name)}</span>`).join('') || '<span class="dim">Empty</span>'}</div>`
       : `<div class="scene-thumb" style="${sc.thumb ? `background-image:url('${esc(sc.thumb)}')` : ''}"></div>`;
     return `
       <section class="panel scene-card ${sc.active ? 'live' : ''}" data-scene="${sc.id}">
@@ -1590,11 +1617,13 @@ function scenesHTML() {
         ${thumb}
         <div class="scene-card-body">
           <input data-scene-field="title" data-id="${sc.id}" data-fk="st-${sc.id}" value="${esc(sc.title)}" placeholder="Title" aria-label="Scene title" class="scene-title-input">
-          ${sc.kind === 'vault' ? '<p class="small dim">Built-in. Players can mark boxes while it’s live. Mark DANGER boxes from its box menu.</p>'
+          ${sc.kind === 'turns' ? '<p class="small dim">Built-in. Only you control it; players just watch. Edit it below or in its window.</p>'
+            : sc.kind === 'vault' ? '<p class="small dim">Built-in. Players can mark boxes while it’s live. Mark DANGER boxes from its box menu.</p>'
             : `<textarea data-scene-field="caption" data-id="${sc.id}" data-fk="sc-${sc.id}" rows="2" placeholder="Caption (optional)" aria-label="Scene caption">${esc(sc.caption)}</textarea>`}
           <div class="row">
             <button class="btn sm ${sc.active ? '' : 'brass'}" data-act="scene-live" data-id="${sc.id}" data-v="${sc.active ? 0 : 1}">${sc.active ? 'Hide from players' : 'Show to players'}</button>
-            ${sc.kind === 'vault'
+            ${sc.kind === 'turns' ? ''
+              : sc.kind === 'vault'
               ? `<button class="btn sm ghost" data-act="vault-reset">Clear all boxes</button>`
               : `<button class="btn sm ghost" data-act="scene-clear" data-id="${sc.id}">Clear markings</button>
                  <button class="btn sm ghost" data-act="scene-replace" data-id="${sc.id}">Replace image</button>
@@ -1614,6 +1643,7 @@ function scenesHTML() {
       </div>
       <p class="small dim">Upload a map or picture, then show it. Each live scene pops up in its own window for everyone, and several can be live at once. Everyone can draw, erase and ping on picture scenes.</p>
       <div class="scene-grid">${S.scenes === null ? '<p class="dim">Loading…</p>' : cards}</div>
+      ${turnsScene() ? `<section class="panel" style="margin-top:18px"><h2>Turn Order</h2><div class="turns-host"></div></section>` : ''}
       ${S.vaultLoaded ? `<section class="panel" style="margin-top:18px"><h2>Vault editor</h2>
         <p class="small dim" style="margin-top:-6px">Mark boxes and DANGER here any time. DANGER stays hidden from players until a box is opened.</p>
         <div class="vault-host">${vaultHTML()}</div></section>` : ''}
@@ -1669,6 +1699,92 @@ function vaultHTML() {
     </div>`;
 }
 
+// ── Rendering: Turn Order (GM-controlled, read-only for players) ──────────
+
+function turnsScene() {
+  return (isGM() && S.scenes && S.scenes.find(x => x.kind === 'turns')) || S.live.find(x => x.kind === 'turns') || null;
+}
+function normTurns(st) {
+  const t = isObj(st) ? st : {};
+  const entries = Array.isArray(t.entries) ? t.entries : [];
+  return { entries, current: Math.max(0, Math.min(entries.length - 1, +t.current || 0)), round: Math.max(1, +t.round || 1) };
+}
+
+function turnsHTML(sc) {
+  const gm = isGM(), st = normTurns(sc && sc.state);
+  const cur = st.entries[st.current];
+  const rows = st.entries.map((e, i) => {
+    const rec = e.sheet_id && S.sheets.get(e.sheet_id);
+    const color = rec ? accentOf(rec) : (e.color || '#9aa3a6');
+    const av = rec ? avatarHTML(rec, 'sm') : `<span class="avatar sm" style="--accent:${esc(color)}">${esc((e.name || '?').charAt(0).toUpperCase())}</span>`;
+    return `
+      <div class="turn-row ${i === st.current ? 'current' : ''}" style="--accent:${esc(color)}">
+        <span class="turn-pos">${i === st.current ? '▶' : i + 1}</span>
+        ${av}
+        <span class="turn-name">${esc(rec ? rec.data.name : e.name)}${rec ? '' : ' <small class="dim">extra</small>'}</span>
+        ${gm ? `<input type="number" class="turn-init" data-turn-init="${esc(e.id)}" value="${e.init ?? ''}" placeholder="Init" aria-label="Initiative for ${esc(e.name)}">`
+             : (e.init != null && e.init !== '' ? `<span class="turn-init-ro" title="Initiative">${esc(e.init)}</span>` : '')}
+        ${gm ? `<span class="row" style="gap:2px">
+          <button class="icon-btn" data-act="turn-move" data-id="${esc(e.id)}" data-d="-1" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="icon-btn" data-act="turn-move" data-id="${esc(e.id)}" data-d="1" aria-label="Move down" ${i === st.entries.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="icon-btn" data-act="turn-del" data-id="${esc(e.id)}" aria-label="Remove ${esc(e.name)}">×</button></span>` : ''}
+      </div>`;
+  }).join('');
+  const inList = new Set(st.entries.map(e => e.sheet_id).filter(Boolean));
+  const free = orderedSheets().filter(r => !inList.has(r.id));
+  return `
+    <div class="turns">
+      <div class="turn-head">
+        <span class="turn-round">Round ${st.round}</span>
+        <span class="turn-now">${cur ? `<b>${esc(cur.sheet_id && S.sheets.get(cur.sheet_id) ? S.sheets.get(cur.sheet_id).data.name : cur.name)}</b>’s turn` : 'No one in the order yet'}</span>
+      </div>
+      ${gm ? `
+      <div class="row turn-ctrl">
+        <button class="btn sm" data-act="turn-step" data-d="-1" ${st.entries.length ? '' : 'disabled'}>◀ Back</button>
+        <button class="btn sm brass" data-act="turn-step" data-d="1" ${st.entries.length ? '' : 'disabled'}>Next turn ▶</button>
+        <span class="spacer"></span>
+        <button class="btn sm ghost" data-act="turn-sort" ${st.entries.length > 1 ? '' : 'disabled'} title="Highest initiative first">Sort by initiative</button>
+        <button class="btn sm ghost" data-act="turn-reset" ${st.entries.length ? '' : 'disabled'}>New fight</button>
+      </div>` : ''}
+      <div class="turn-list">${rows || '<p class="small dim" style="text-align:center;margin:18px 0">The GM hasn’t set up the order yet.</p>'}</div>
+      ${gm ? `
+      <div class="turn-add">
+        <form class="row" data-act-form="turn-add-sheet">
+          <select name="sheet" aria-label="Add a character"><option value="">Add a character…</option>${free.map(r => `<option value="${r.id}">${esc(r.data.name)}</option>`).join('')}</select>
+          <button class="btn sm" type="submit" ${free.length ? '' : 'disabled'}>Add</button>
+        </form>
+        <form class="row" data-act-form="turn-add-name">
+          <input name="name" placeholder="Add an extra (NPC, enemy…)" maxlength="40" aria-label="Name of an extra" autocomplete="off">
+          <button class="btn sm" type="submit">Add</button>
+        </form>
+        ${st.entries.length ? '<button class="btn sm danger" data-act="turn-clear">Clear the order</button>' : ''}
+      </div>` : ''}
+    </div>`;
+}
+
+// Re-render every place the Turn Order shows, unless the GM is typing in it.
+function renderTurnsViews() {
+  const sc = turnsScene();
+  if (!sc) return;
+  const html = turnsHTML(sc);
+  document.querySelectorAll('.turns-host').forEach(host => {
+    if (host.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+    if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
+  });
+}
+
+async function saveTurns(mutate) {
+  const sc = turnsScene();
+  if (!sc) return;
+  const st = normTurns(clone(sc.state));
+  mutate(st);
+  st.current = Math.max(0, Math.min(st.entries.length - 1, st.current));
+  for (const list of [S.scenes || [], S.live]) { const x = list.find(y => y.id === sc.id); if (x) x.state = clone(st); }
+  renderTurnsViews();
+  try { await api('gm_scene_state', { p_id: sc.id, p_state: st }); ping(); }
+  catch (err) { fail(err); S.since = null; }
+}
+
 function renderVaultViews() {
   if (S.route.view === 'scenes') { const h = $('#main .vault-host'); if (h) h.innerHTML = vaultHTML(); }
   for (const [id, w] of winEls) {
@@ -1689,10 +1805,12 @@ function canvasFor(sc) {
 
 function toolsHTML(sc) {
   const gm = isGM();
+  const names = { pen: '✎ Pen', erase: '⌫ Erase', text: 'T Text', select: '✥ Move text', ping: '◎ Ping' };
   return `
     <div class="draw-tools">
-      ${['pen', 'erase', 'text', 'ping'].map(t => `<button class="tool ${S.tool === t ? 'on' : ''}" data-tool="${t}">${{ pen: '✎ Pen', erase: '⌫ Erase', text: 'T Text', ping: '◎ Ping' }[t]}</button>`).join('')}
-      <span class="widths" role="radiogroup" aria-label="Pen and text size">${PEN_WIDTHS.map(w => `<button class="wbtn ${S.penWidth === w ? 'on' : ''}" data-width="${w}" role="radio" aria-checked="${S.penWidth === w}" aria-label="Size ${w}" title="Size ${w}"><i style="width:${Math.min(15, w + 2)}px;height:${Math.min(15, w + 2)}px"></i></button>`).join('')}</span>
+      ${Object.keys(names).map(t => `<button class="tool ${S.tool === t ? 'on' : ''}" data-tool="${t}">${names[t]}</button>`).join('')}
+      <span class="widths pen-only" role="radiogroup" aria-label="Pen width">${PEN_WIDTHS.map(w => `<button class="wbtn ${S.penWidth === w ? 'on' : ''}" data-width="${w}" role="radio" aria-checked="${S.penWidth === w}" aria-label="Pen width ${w}" title="Pen width ${w}"><i style="width:${Math.min(15, w + 2)}px;height:${Math.min(15, w + 2)}px"></i></button>`).join('')}</span>
+      <span class="tsizes text-only" role="radiogroup" aria-label="Text size">${TEXT_SIZES.map(([w, l], i) => `<button class="tsbtn ${S.textSize === w ? 'on' : ''}" data-tsize="${w}" role="radio" aria-checked="${S.textSize === w}" title="Text size ${l}" style="font-size:${10 + i * 2.5}px">${l}</button>`).join('')}</span>
       ${gm ? `<label class="swatch gm-swatch" title="Your pen colour (GM only)" style="background:${esc(myColor())}"><input type="color" value="${esc(myColor())}" data-gm-color aria-label="Pen colour"></label>`
            : `<span class="swatch" style="background:${esc(myColor())}" title="Your colour"></span>`}
       <span class="spacer"></span>
@@ -1711,7 +1829,7 @@ function openTextInput(c, x, y) {
   inp.placeholder = 'Type, then Enter';
   inp.style.left = (x * 100) + '%'; inp.style.top = (y * 100) + '%';
   inp.style.color = myColor();
-  inp.style.fontSize = Math.max(11, textPx(S.penWidth, c.box.clientWidth)) + 'px';
+  inp.style.fontSize = Math.max(11, textPx(S.textSize, c.box.clientWidth)) + 'px';
   c.box.appendChild(inp);
   setTimeout(() => inp.focus(), 0);
   let done = false;
@@ -1722,7 +1840,7 @@ function openTextInput(c, x, y) {
     inp.remove();
     if (!save || !text) return;
     try {
-      const st = await api('add_stroke', { p_scene: c.id, p_color: myColor(), p_width: S.penWidth, p_points: [x, y], p_text: text });
+      const st = await api('add_stroke', { p_scene: c.id, p_color: myColor(), p_width: S.textSize, p_points: [x, y], p_text: text });
       applyStroke(st); redraw(c); ping();
     } catch (err) { fail(err); }
   };
@@ -1734,6 +1852,7 @@ function openTextInput(c, x, y) {
 function makeCanvas(sc) {
   const el = document.createElement('div');
   el.className = 'draw ' + sc.kind;
+  el.dataset.tool = S.tool;
   el.innerHTML = `${toolsHTML(sc)}
     <div class="draw-stage"><div class="draw-box">${sc.kind === 'image' ? '<img class="draw-img" alt="" draggable="false">' : ''}<canvas></canvas><div class="pings"></div></div></div>`;
   const c = { id: sc.id, kind: sc.kind, el, stage: el.querySelector('.draw-stage'), box: el.querySelector('.draw-box'),
@@ -1741,8 +1860,19 @@ function makeCanvas(sc) {
               aspect: sc.kind === 'board' ? 16 / 7 : 16 / 10, imgKey: null, cur: null, erase: null };
 
   el.addEventListener('click', e => {
-    const t = e.target.closest('[data-tool]');
-    if (t) { S.tool = t.dataset.tool; document.querySelectorAll('.draw-tools .tool').forEach(b => b.classList.toggle('on', b.dataset.tool === S.tool)); document.querySelectorAll('.draw-box').forEach(b => b.dataset.tool = S.tool); return; }
+    const t = e.target.closest('.tool[data-tool]');   // the .draw wrapper carries data-tool too
+    if (t) {
+      S.tool = t.dataset.tool;
+      document.querySelectorAll('.draw-tools .tool').forEach(b => b.classList.toggle('on', b.dataset.tool === S.tool));
+      document.querySelectorAll('.draw-box, .draw').forEach(b => { b.dataset.tool = S.tool; });
+      return;
+    }
+    const ts = e.target.closest('[data-tsize]');
+    if (ts) {
+      S.textSize = +ts.dataset.tsize; lsSet('debt.textsize', String(S.textSize));
+      document.querySelectorAll('.tsbtn').forEach(b => { const on = +b.dataset.tsize === S.textSize; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+      return;
+    }
     const wb = e.target.closest('[data-width]');
     if (wb) {
       S.penWidth = +wb.dataset.width; lsSet('debt.pen', String(S.penWidth));
@@ -1768,6 +1898,15 @@ function makeCanvas(sc) {
     const [x, y] = norm(e);
     if (S.tool === 'ping') { const p = { scene: c.id, x, y, color: myColor(), who: myName() }; showLocPing(p); send('loc', p); return; }
     if (S.tool === 'text') { e.preventDefault(); openTextInput(c, x, y); return; }
+    if (S.tool === 'select') {
+      const h = hitText(c, e);
+      if (!h) return;
+      e.preventDefault();
+      try { box.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+      S.drawing = true;
+      c.drag = { id: h.id, dx: x - h.points[0], dy: y - h.points[1] };
+      return;
+    }
     e.preventDefault();
     try { box.setPointerCapture(e.pointerId); } catch { /* synthetic or lost pointer */ }
     S.drawing = true;
@@ -1775,6 +1914,15 @@ function makeCanvas(sc) {
     else { c.erase = new Set(); eraseAt(c, e); }
   });
   box.addEventListener('pointermove', e => {
+    if (c.drag) {
+      const st = (S.strokes.get(c.id) || new Map()).get(c.drag.id);
+      if (!st) return;
+      const [x, y] = norm(e);
+      const r4 = v => Math.round(Math.max(0, Math.min(1, v)) * 10000) / 10000;
+      st.points = [r4(x - c.drag.dx), r4(y - c.drag.dy)];
+      redraw(c);
+      return;
+    }
     if (c.cur) {
       const [x, y] = norm(e), p = c.cur.points;
       const dx = x - p[p.length - 2], dy = y - p[p.length - 1];
@@ -1790,6 +1938,16 @@ function makeCanvas(sc) {
   });
   const end = async () => {
     S.drawing = false;
+    if (c.drag) {
+      const drag = c.drag, st = (S.strokes.get(c.id) || new Map()).get(drag.id);
+      c.drag = null;
+      if (st) {
+        try { applyStroke(await api('move_stroke', { p_id: drag.id, p_points: st.points })); ping(); }
+        catch (err) { fail(err); S.since = null; }
+      }
+      if (S.deferRender) renderMain();
+      return;
+    }
     const cur = c.cur, er = c.erase;
     c.cur = null; c.erase = null;
     if (cur && cur.points.length >= 4) {
@@ -1856,6 +2014,21 @@ function redraw(c) {
   if (c.cur) draw(c.cur);
 }
 function redrawScene(id) { const c = canvases.get(id); if (c) redraw(c); }
+
+// Select tool: the topmost text label under the pointer.
+function hitText(c, e) {
+  const r = c.box.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  const ctx = c.canvas.getContext('2d');
+  let hit = null;
+  for (const s of (S.strokes.get(c.id) || new Map()).values()) {
+    if (!s.text) continue;
+    const fs = textPx(s.width, r.width);
+    ctx.font = `${fs}px "Special Elite", "Courier New", monospace`;
+    const tw = ctx.measureText(s.text).width, x0 = s.points[0] * r.width, yc = s.points[1] * r.height;
+    if (px > x0 - 8 && px < x0 + tw + 8 && Math.abs(py - yc) < fs / 2 + 8) hit = s;
+  }
+  return hit;
+}
 
 // Eraser: rub out whole strokes that pass under the pointer.
 function eraseAt(c, e) {
@@ -1948,7 +2121,9 @@ function renderScenes() {
     cap.textContent = sc.caption || ''; cap.hidden = !sc.caption;
     w.querySelector('[data-win="full"]').textContent = st.full ? '⤡' : '⤢';
     const body = w.querySelector('.scene-body');
-    if (sc.kind === 'vault') {
+    if (sc.kind === 'turns') {
+      if (!body.querySelector('.turns-host')) body.innerHTML = '<div class="turns-host"></div>';
+    } else if (sc.kind === 'vault') {
       if (!body.querySelector('.vault-wrap') || !st.min) body.innerHTML = vaultHTML();
     } else {
       const c = canvasFor(sc);
@@ -1964,6 +2139,7 @@ function renderScenes() {
       layout(c);
     }
   });
+  renderTurnsViews();
   const bar = $('#pill-bar');
   bar.innerHTML = live.filter(sc => S.wins[sc.id] && S.wins[sc.id].min).map(sc =>
     `<button class="scene-pill" data-act="win-restore" data-id="${sc.id}"><span class="live-dot"></span><b>${esc(sc.title || 'Untitled')}</b></button>`).join('');
@@ -2275,6 +2451,11 @@ document.addEventListener('change', async e => {
     if (file) setPortrait(el.dataset.sheetFile, file);
     return;
   }
+  if (el.dataset.turnInit) {
+    const v = el.value === '' ? null : Number(el.value);
+    saveTurns(st => { const x = st.entries.find(y => y.id === el.dataset.turnInit); if (x) x.init = v; });
+    return;
+  }
   if (el.id === 'chat-to') { S.chatTo = el.value; $('#chat-input').placeholder = chatPlaceholder(); return; }
   if (el.dataset.sessionDate) {
     const id = el.dataset.sessionDate, g = (S.gmSessions || []).find(x => String(x.id) === id);
@@ -2283,6 +2464,7 @@ document.addEventListener('change', async e => {
     return;
   }
   if (el.dataset.setting) {
+    el.setAttribute('aria-checked', el.checked);
     try { S.settings = await api('gm_set_settings', { p_settings: { [el.dataset.setting]: el.checked } }); ping(); toast('Setting saved.'); }
     catch (err) { fail(err); }
     return;
@@ -2315,6 +2497,16 @@ document.addEventListener('submit', async e => {
   const kind = form.dataset.actForm;
   if (!kind) return;
   e.preventDefault();
+  if (kind === 'turn-add-sheet') {
+    const id = form.elements.sheet.value, rec = S.sheets.get(id);
+    if (rec) saveTurns(st => { st.entries.push({ id: uid(), sheet_id: id, name: rec.data.name, init: null }); });
+    return;
+  }
+  if (kind === 'turn-add-name') {
+    const name = form.elements.name.value.trim();
+    if (name) saveTurns(st => { st.entries.push({ id: uid(), sheet_id: null, name, init: null }); });
+    return;
+  }
   const input = form.querySelector('input[name="p"]');
   const value = input.value;
   try {
@@ -2441,6 +2633,31 @@ document.addEventListener('click', async e => {
              n: Math.max(1, Math.min(20, +g.dice || 1)), sides: Math.max(2, Math.min(10, +g.die || 6)), parts });
       break;
     }
+    case 'turn-step': saveTurns(st => {
+      if (!st.entries.length) return;
+      st.current += dd;
+      if (st.current >= st.entries.length) { st.current = 0; st.round += 1; }
+      if (st.current < 0) { st.current = st.entries.length - 1; st.round = Math.max(1, st.round - 1); }
+    }); break;
+    case 'turn-sort': saveTurns(st => {
+      const n = v => (v === '' || v == null || isNaN(+v) ? -Infinity : +v);
+      st.entries.sort((a, b) => n(b.init) - n(a.init)); st.current = 0;
+    }); break;
+    case 'turn-reset': saveTurns(st => { st.current = 0; st.round = 1; }); break;
+    case 'turn-clear': if (confirm('Clear the whole turn order?')) saveTurns(st => { st.entries = []; st.current = 0; st.round = 1; }); break;
+    case 'turn-move': saveTurns(st => {
+      const k = st.entries.findIndex(x => x.id === el.dataset.id), j = k + dd;
+      if (k < 0 || j < 0 || j >= st.entries.length) return;
+      const curId = st.entries[st.current] && st.entries[st.current].id;
+      [st.entries[k], st.entries[j]] = [st.entries[j], st.entries[k]];
+      st.current = Math.max(0, st.entries.findIndex(x => x.id === curId));   // the highlight follows whoever's turn it is
+    }); break;
+    case 'turn-del': saveTurns(st => {
+      const k = st.entries.findIndex(x => x.id === el.dataset.id);
+      if (k < 0) return;
+      st.entries.splice(k, 1);
+      if (k < st.current) st.current -= 1;
+    }); break;
     case 'kit-add': commit(rec.id, 'kit', [...d.kit, blankKit(el.dataset.kind)]); renderMain(); break;
     case 'kit-del': commit(rec.id, 'kit', d.kit.filter((_, j) => j !== i)); renderMain(); break;
     case 'rules-tab': S.rulesTab = el.dataset.t; renderMain(); break;

@@ -32,6 +32,7 @@ sheets, a shared dice log, the Grit pool, Wear rerolls, scenes and the Vault.
   - A manual roller, plus formulas like `2d6+wits+perception`.
 - **Scenes (GM).** Upload maps or pictures. Several can be live at once, each in its own floating window for everyone.
   - Everyone can draw in their colour, erase and ping. The GM can clear a scene.
+- **Turn Order.** A built-in scene the GM controls: characters and extras, initiative, sort, reorder, Next turn with the current turn highlighted, and a round counter. Players watch it read-only.
 - **The Vault.** A built-in scene with 100 boxes (A1–Y4).
   - Players mark boxes Open, In progress or Complete.
   - The GM can secretly mark DANGER boxes, which show to players once opened.
@@ -46,7 +47,7 @@ polling as a backup.
 - Static `index.html` + `styles.css` + `app.js`. No build step. Vercel serves
   the repo as-is on every push to `main`.
 - Data lives in the Supabase project **beacon** (RJ org, ap-south-1).
-  The schema is `supabase/schema.sql` (v2), then `supabase/v3.sql` and `supabase/v4.sql` on top.
+  The schema is `supabase/schema.sql` (v2), then `supabase/v3.sql`, `v4.sql` and `v5.sql` on top.
 - The browser only holds the public Supabase key and a session token. Tables
   are closed to that key. Every call goes through a database function that
   checks the session and the role first.
