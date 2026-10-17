@@ -20,6 +20,9 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 12 (2026-10-18)
+- [x] Online chip padding: the first portrait was pulled past the pill's left edge by the -7px overlap margin. The first portrait now has no negative margin, the chip has 5px left padding, and portraits are round. Checked with 1 and 3 portraits on desktop and phone. Deployed `?v=13`.
+
 ## Round 11 (2026-10-18)
 - [x] Moved the online chip to the right of the top bar, just before the signed-in chip; its list opens leftwards. On narrow screens Log out stays right-aligned on the second row. Checked desktop + phone. Deployed `?v=12`.
 

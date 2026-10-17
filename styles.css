@@ -1144,3 +1144,9 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 .online-wrap + .me { margin-left: 10px; }
 .online-pop { left: auto; right: 0; }
 @media (max-width: 900px) { .online-wrap + .me { margin-left: auto; } }   /* when the bar wraps, keep Log out on the right */
+
+/* Online chip: keep the portraits inside the pill (the first one was pulled left by the overlap margin). */
+.online-chip { padding: 3px 12px 3px 5px; }
+.oc-faces { padding-left: 0; }
+.oc-faces .avatar.xs { border-radius: 50%; }
+.oc-faces .avatar.xs:first-child { margin-left: 0; }
