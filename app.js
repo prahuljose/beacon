@@ -334,11 +334,11 @@ window.addEventListener('online', () => { if (S.ready) sync(); });
 
 // ── Realtime: sync pings, live strokes, location pings ─────────────────────
 
-let channel = null;
+let channel = null, rtClient = null, rtDownSince = 0;
 function connectRealtime() {
   try {
     if (channel || !window.supabase) return;
-    const client = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false } });
+    const client = rtClient || (rtClient = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false } }));
     // Local testing uses its own channel, so test logins never show as "online" to the real crew.
     const name = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? 'debt-crew-dev' : 'debt-crew';
     channel = client.channel(name, { config: { broadcast: { self: false }, presence: { key: TAB_ID } } });
@@ -363,14 +363,40 @@ function connectRealtime() {
       st.points = p.points;
       redrawScene(p.scene);
     });
-    channel.on('presence', { event: 'sync' }, () => { S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); renderLoginStatus(); });
+    const ch = channel;   // callbacks from a replaced channel are ignored
+    channel.on('presence', { event: 'sync' }, () => { if (ch !== channel) return; S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); renderLoginStatus(); });
     channel.subscribe(status => {
+      if (ch !== channel) return;
       S.rtLive = status === 'SUBSCRIBED';
       if (S.rtLive) { if (S.me) trackPresence(); else trackViewer(); }
       renderOnline();
     });
   } catch { channel = null; /* polling still works */ }
 }
+// Watchdog: the chip follows the channel's real state, our own presence entry
+// is put back if it's missing or stale (e.g. still the login-page viewer), and
+// a channel that stays down for 12 s is replaced with a fresh one.
+setInterval(() => {
+  if (!channel) { if (S.token || $('.login')) connectRealtime(); return; }
+  const live = channel.state === 'joined';
+  if (live !== S.rtLive) { S.rtLive = live; renderOnline(); }
+  if (live) {
+    rtDownSince = 0;
+    const meta = ((S.presence || {})[TAB_ID] || [])[0];
+    if (S.me) {
+      if (!meta || meta.role !== S.me.role || (meta.sheet_id || null) !== (S.me.sheet_id || null)) trackPresence();
+    } else if (!meta && $('.login')) trackViewer();
+  } else if (!document.hidden) {
+    rtDownSince = rtDownSince || Date.now();
+    if (Date.now() - rtDownSince > 12000) {
+      const old = channel;
+      channel = null; rtDownSince = 0;
+      try { rtClient.removeChannel(old); } catch { /* already gone */ }
+      connectRealtime();
+    }
+  }
+}, 3000);
+
 // ── Who's online (Realtime Presence) ───────────────────────────────────────
 // Each open tab announces who it's logged in as and whether it's in the
 // foreground. Closing the tab removes it; a dropped connection times out.
@@ -1044,7 +1070,6 @@ function vaultDoor(name) {
         ${Array.from({ length: 8 }, (_, i) => `<i class="bolt" style="--a:${i * 45 + 22.5}deg"></i>`).join('')}
         <div class="vault-ring"></div>
         <div class="vault-dial"><div class="vault-wheel"><i></i><i></i><i></i></div><b></b></div>
-        <span class="vault-plate">DEBT · CREW VAULT</span>
       </div>
     </div>
     <p class="vault-hello">Welcome back, <b>${esc(name)}</b></p>`;

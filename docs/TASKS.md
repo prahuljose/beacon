@@ -20,6 +20,12 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 16 (2026-10-18)
+- [x] Online chip stuck on "Connecting…" after a player logged in (user report; couldn't reproduce locally or on the live login page). Made it self-healing: a 3 s watchdog sets the chip from the channel's real state (`channel.state === 'joined'`), re-tracks our own presence if it's missing or stale (e.g. still the login-page viewer), and replaces a channel that stays down for 12 s (`rtClient.removeChannel` + `connectRealtime`). Callbacks from a replaced channel are ignored. Tested: forced-off flag heals in 3 s, stale viewer meta re-tracked, a killed channel rejoins in ~15 s.
+- [x] Vault door: removed the "DEBT · CREW VAULT" plate; bolts offset 22.5° so none sit at top/bottom. "Welcome back, <name>" under the door stays.
+- [ ] Neon sign redesign: thick-tube mockups (A amber / B double-line / C red / D worn, glow + thickness sliders) shown; waiting for the user's pick before building.
+- Deployed `?v=17`.
+
 ## Round 15 (2026-10-18): login page extras
 - [x] Flickering neon sign: "DEBT" is four amber neon tubes; every few seconds one sputters, and about 1 time in 8 the whole sign blacks out for half a second (`startNeon`, stops itself when the login page is gone; off for reduced motion).
 - [x] Live status on the ID cards: Online (pulsing green dot) / Away / Offline under each name, and "· GM is in / away" on the GM card. Uses the same Realtime presence as the top bar. The login page has to track something to receive presence, so it tracks `{ role: 'viewer' }`, which presenceMap() ignores (no one sees it).

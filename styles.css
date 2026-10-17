@@ -1396,8 +1396,6 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 .vault-dial::before { content: ''; position: absolute; inset: 0; border-radius: 50%; transition: transform 1s cubic-bezier(.4,0,.2,1);
   background: repeating-conic-gradient(from 0deg, transparent 0 9deg, rgba(255,255,255,.06) 9deg 10deg); }
 .vault.go .vault-dial::before { transform: rotate(320deg); }
-.vault-plate { position: absolute; left: 50%; bottom: 11%; transform: translateX(-50%); white-space: nowrap; font-family: var(--slab); font-size: clamp(9px, 1.8vmin, 13px); letter-spacing: .2em;
-  color: #1b1f22; background: linear-gradient(180deg, #e6c56d, #a9852f); padding: 3px 10px; border-radius: 3px; box-shadow: 0 2px 4px rgba(0,0,0,.4); }
 .vault-hello { margin: 0; font-size: 15px; color: var(--dim); letter-spacing: .08em; opacity: 0; animation: tile-in .5s .3s forwards; transition: opacity .3s .5s; }
 .vault-hello b { color: var(--brass); font-family: var(--slab); font-weight: 400; letter-spacing: .04em; }
 .vault.open .vault-hello { opacity: 1; animation: hello-out .35s forwards; }
