@@ -20,6 +20,12 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 8 request (2026-10-18)
+- [x] In-game Day and Time in the top bar (next to DEBT), visible to everyone at all times. Only the GM can change it: click the clock for Day −/+, time −1h/−15m/+15m/+1h, a time box, and presets (Dawn, Morning, Noon, Dusk, Night, Midnight). Going past midnight moves to the next day. The style changes with the time (sun by day, horizon at dawn/dusk, moon and blue tint at night) and pulses when it changes.
+- [x] Stored as `crew.settings.clock = { day, minutes }` and saved via gm_set_settings (GM-only), so no DB migration was needed.
+- [x] Bug caught in testing: 00:00 was treated as unset and showed 08:00. Fixed.
+- [x] The user has changed the GM password (no longer the original). For local GM testing I used a temporary `zztest-gm-…` session inserted in private.sessions, then deleted it. Deployed `?v=8`.
+
 ## Round 7 request (2026-10-17)
 - [x] Login page redesign, on brand: big DEBT wordmark, a featured brass "Game Master" card (seal, sheen, Sign in button), ID-card tiles with large portraits and name plates (accent strip, tick when picked, greyed "No password yet"), a password panel that opens under whatever was picked, and a shake on a wrong password.
 - [x] Fixed while checking it by eye: the old `#login-pass` rule (360px, full-width button) squeezed the panel; the entrance animation's `both` fill blocked hover lifts (now `backwards`).

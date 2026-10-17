@@ -14,6 +14,7 @@ sheets, a shared dice log, the Grit pool, Wear rerolls, scenes and the Vault.
 
 ## What's in it
 
+- **In-game clock.** Day and time in the top bar for everyone. Only the GM sets it.
 - **Crew board.**
   - Shared Grit pool: anyone can add, remove or spend Grit. The session roll is once per session, and the GM reopens it.
   - Chat.

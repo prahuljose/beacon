@@ -422,6 +422,7 @@ async function sync() {
     if (changed.size) renderNav();
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);
     if (rulesChanged && S.route.view === 'rules') refreshMain(new Set(), true);
+    if (crewChanged) renderClock();
     if (rollsChanged || crewChanged || changed.size) renderLog();
     if (chatChanged) renderChat();
     if (liveChanged || vaultChanged || changed.size) renderScenes();
@@ -752,6 +753,7 @@ function renderApp() {
   app.innerHTML = `
     <header class="top">
       <a class="brand" href="#/crew">DEBT</a>
+      <div class="clock-wrap" id="clock"></div>
       <nav class="nav" id="nav"></nav>
       <div class="me" id="me"></div>
     </header>
@@ -765,6 +767,7 @@ function renderApp() {
     <input type="file" id="file-import" accept="application/json,.json" hidden>
     <input type="file" id="file-scene" accept="image/*" hidden>`;
   renderNav();
+  renderClock();
   renderMain();
   renderLog();
   renderScenes();
@@ -777,6 +780,81 @@ function accentOf(rec) {
   if (rec.data.accent) return rec.data.accent;
   const i = orderedSheets().findIndex(r => r.id === rec.id);
   return PALETTE[(i < 0 ? 0 : i) % PALETTE.length];
+}
+
+// ── In-game day & time (GM sets it, everyone sees it) ─────────────────────
+
+const CLOCK_PRESETS = [['Dawn', 360], ['Morning', 540], ['Noon', 720], ['Dusk', 1080], ['Night', 1290], ['Midnight', 0]];
+function getClock() {
+  const c = S.clockPending || (isObj(S.settings.clock) ? S.settings.clock : {});   // a change still saving wins
+  const m = c.minutes == null || isNaN(+c.minutes) ? 480 : +c.minutes;   // 0 is midnight, not "unset"
+  return { day: Math.max(1, +c.day || 1), minutes: (m % 1440 + 1440) % 1440 };
+}
+const fmtClock = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+// Crossing midnight moves the day on (or back).
+function shiftClock(c, delta) {
+  let m = c.minutes + delta;
+  while (m >= 1440) { m -= 1440; c.day += 1; }
+  while (m < 0) { if (c.day > 1) { m += 1440; c.day -= 1; } else { m = 0; } }
+  c.minutes = m;
+}
+function clockPhase(m) {
+  if (m >= 300 && m < 420) return ['dawn', 'Dawn'];
+  if (m >= 420 && m < 1050) return ['day', 'Day'];
+  if (m >= 1050 && m < 1200) return ['dusk', 'Dusk'];
+  return ['night', 'Night'];
+}
+const SUN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>';
+const MOON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 14.6A8.5 8.5 0 0 1 9.4 3.5a8.5 8.5 0 1 0 11.1 11.1z"/></svg>';
+const HORIZON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 17a7 7 0 0 1 14 0"/><path d="M2 20h20M12 4v3M4.2 9.2l2 2M19.8 9.2l-2 2"/></svg>';
+
+function renderClock() {
+  const host = $('#clock');
+  if (!host) return;
+  const gm = isGM(), c = getClock(), [phase, phaseName] = clockPhase(c.minutes);
+  const icon = phase === 'day' ? SUN_SVG : phase === 'night' ? MOON_SVG : HORIZON_SVG;
+  const key = c.day + '|' + c.minutes;
+  const bump = S.clockKey != null && S.clockKey !== key;
+  S.clockKey = key;
+  const face = `
+    <span class="clock-icon">${icon}</span>
+    <span class="clock-day">Day ${c.day}</span>
+    <span class="clock-sep"></span>
+    <span class="clock-time">${fmtClock(c.minutes)}</span>`;
+  host.innerHTML = gm
+    ? `<button class="clock ${phase} ${bump ? 'bump' : ''}" data-act="clock-toggle" aria-expanded="${!!S.clockOpen}" title="In-game day and time (click to change)">${face}<span class="clock-caret">▾</span></button>
+       ${S.clockOpen ? `
+       <div class="clock-pop" role="dialog" aria-label="Set the in-game day and time">
+         <div class="cp-row"><span class="cp-lbl">Day</span>
+           <span class="stepper"><button data-act="clock-day" data-d="-1" aria-label="Previous day" ${c.day <= 1 ? 'disabled' : ''}>−</button><b>Day ${c.day}</b><button data-act="clock-day" data-d="1" aria-label="Next day">+</button></span></div>
+         <div class="cp-row"><span class="cp-lbl">Time</span>
+           <span class="cp-time">
+             <button class="btn sm" data-act="clock-time" data-d="-60">−1h</button>
+             <button class="btn sm" data-act="clock-time" data-d="-15">−15m</button>
+             <input type="time" id="clock-input" value="${fmtClock(c.minutes)}" step="300" aria-label="Time of day">
+             <button class="btn sm" data-act="clock-time" data-d="15">+15m</button>
+             <button class="btn sm" data-act="clock-time" data-d="60">+1h</button>
+           </span></div>
+         <div class="cp-presets">${CLOCK_PRESETS.map(([n, m]) => `<button class="btn sm ${c.minutes === m ? 'on' : ''}" data-act="clock-preset" data-v="${m}">${n} <small>${fmtClock(m)}</small></button>`).join('')}</div>
+         <p class="small dim cp-note">Everyone sees this at the top. Going past midnight moves to the next day.</p>
+       </div>` : ''}`
+    : `<div class="clock ${phase} ${bump ? 'bump' : ''}" title="In-game day and time · ${phaseName}">${face}</div>`;
+}
+
+let clockTimer = null;
+function setClock(mutate) {
+  const c = getClock();
+  mutate(c);
+  S.clockPending = c;
+  renderClock();
+  clearTimeout(clockTimer);
+  clockTimer = setTimeout(async () => {
+    const want = S.clockPending;
+    try { S.settings = await api('gm_set_settings', { p_settings: { clock: want } }); ping(); }
+    catch (err) { fail(err); }
+    if (S.clockPending === want) S.clockPending = null;
+    renderClock();
+  }, 250);
 }
 
 function renderNav() {
@@ -2527,6 +2605,11 @@ document.addEventListener('change', async e => {
     saveTurns(st => { const x = st.entries.find(y => y.id === el.dataset.turnInit); if (x) x.init = v; });
     return;
   }
+  if (el.id === 'clock-input' && el.value) {
+    const [h, m] = el.value.split(':').map(Number);
+    setClock(c => { c.minutes = h * 60 + m; });
+    return;
+  }
   if (el.id === 'chat-to') { S.chatTo = el.value; $('#chat-input').placeholder = chatPlaceholder(); return; }
   if (el.dataset.sessionDate) {
     const id = el.dataset.sessionDate, g = (S.gmSessions || []).find(x => String(x.id) === id);
@@ -2599,8 +2682,10 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) {
     if (S.vaultMenu && !e.target.closest('.v-menu')) { S.vaultMenu = null; renderVaultViews(); }
+    if (S.clockOpen && !e.target.closest('.clock-wrap')) { S.clockOpen = false; renderClock(); }
     return;
   }
+  if (S.clockOpen && !el.closest('.clock-wrap')) { S.clockOpen = false; renderClock(); }
   const act = el.dataset.act;
   const rec = currentSheet(el);
   const d = rec && rec.data;
@@ -2610,6 +2695,10 @@ document.addEventListener('click', async e => {
   switch (act) {
     // Shell
     case 'logout': signOut(); break;
+    case 'clock-toggle': S.clockOpen = !S.clockOpen; renderClock(); break;
+    case 'clock-day': setClock(c => { c.day = Math.max(1, c.day + dd); }); break;
+    case 'clock-time': setClock(c => { shiftClock(c, dd); }); break;
+    case 'clock-preset': setClock(c => { c.minutes = +el.dataset.v; }); break;
     case 'log-toggle': S.logOpen = !S.logOpen; $('#log').classList.toggle('open', S.logOpen); break;
     case 'tab': S.tab = el.dataset.t; lsSet('debt.tab', S.tab); renderMain(); break;
     case 'customize': S.customize = !S.customize; renderMain(); break;
