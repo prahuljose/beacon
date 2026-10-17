@@ -238,6 +238,7 @@ const S = {
   tokenPick: lsGet('debt.tokpick') || '',  // 'gm' | 'sheet:<id>' | 'npc'
   npcName: '',
   stats: { rows: null, loading: false, range: 'all', sel: null, sort: 'rolls', at: 0 },
+  sound: lsGet('debt.sound') !== '0',
   net: 'ok',             // connection banner: 'ok' | 'down' | 'back'
 };
 const pending = new Map(); // `${id}|${path}` -> { id, path, value, timer }
@@ -437,6 +438,214 @@ setInterval(() => {
   for (const [k, d] of S.drafts) if (now - d.t > 8000) { S.drafts.delete(k); redrawScene(d.scene); }
 }, 4000);
 
+// ── Dice tray ──────────────────────────────────────────────────────────────
+// A felt tray in the dice panel. New rolls, Grit dice and Wear rerolls tumble
+// across it first; the log entry waits (TRAY.hold) and then "lands": d6s show
+// pips that fade into numbers and the total counts up (TRAY.settle).
+
+const TRAY = { q: [], busy: false, hold: new Map(), settle: new Map(), counted: new Set(), gritPulse: 0, closeT: null };
+const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+const dotsHTML = v => Array.from({ length: 9 }, (_, i) => `<i${PIPS[v].includes(i) ? '' : ' class="off"'}></i>`).join('');
+const DIE_SHAPES = {
+  4: 'polygon(50% 4%, 97% 92%, 3% 92%)', 8: 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)',
+  10: 'polygon(50% 0, 96% 40%, 50% 100%, 4% 40%)', 12: 'polygon(50% 0, 98% 36%, 80% 96%, 20% 96%, 2% 36%)',
+  20: 'polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%)',
+};
+const SOUND_ON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
+const SOUND_OFF_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="m17 9 5 5M22 9l-5 5"/></svg>';
+const reducedMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Only play when someone can see it: tab in front, dice panel on screen.
+function trayVisible() {
+  const log = $('#log');
+  if (!log || !$('#tray') || document.hidden || reducedMotion()) return false;
+  // On narrow screens the panel is a drawer that slides down out of view when closed.
+  const t = $('#tray').getBoundingClientRect();
+  return t.width > 0 && t.left < window.innerWidth - 20 && t.top < window.innerHeight - 40 && t.bottom > 0;
+}
+function trayEvent(type, before, r) {
+  if (!S.ready || !trayVisible() || !r.dice || !r.dice.length) return false;
+  if (type !== 'roll' && !before) return false;
+  TRAY.hold.set(r.id, type === 'roll' ? null : { row: before, type });
+  TRAY.q.push({ type, before, id: r.id });
+  // A burst of rolls: show the older ones straight away.
+  while (TRAY.q.length > 3) { const ev = TRAY.q.shift(); TRAY.hold.delete(ev.id); }
+  // Start on the next tick: applyRoll stores the roll after this returns.
+  if (!TRAY.busy) { TRAY.busy = true; setTimeout(playTray, 0); }
+  return true;
+}
+async function playTray() {
+  const ev = TRAY.q.shift();
+  if (!ev) { TRAY.busy = false; clearTimeout(TRAY.closeT); TRAY.closeT = setTimeout(closeTray, 150); return; }
+  TRAY.busy = true;
+  clearTimeout(TRAY.closeT);
+  const r = S.rolls.get(ev.id);
+  if (r && TRAY.hold.has(ev.id)) {
+    try { await animateTray(ev, r); } catch { /* the entry still lands */ }
+  }
+  trayLand(ev);
+  setTimeout(playTray, 60);
+}
+function closeTray() {
+  const w = $('#tray-wrap');
+  if (w) w.classList.remove('open');
+  setTimeout(() => { if (!TRAY.busy) document.querySelectorAll('#tray .tdie').forEach(d => d.remove()); }, 400);
+}
+function trayLand(ev) {
+  const r = S.rolls.get(ev.id);
+  TRAY.hold.delete(ev.id);
+  if (!r) return renderLog();
+  const before = ev.before;
+  const gritChanged = !before || JSON.stringify((before.extras || []).map(e => e.die)) !== JSON.stringify((r.extras || []).map(e => e.die));
+  TRAY.settle.set(r.id, { at: performance.now(), from: before ? before.total : 0, dice: ev.type !== 'grit', grit: ev.type === 'grit' || (ev.type === 'reroll' && gritChanged && (r.extras || []).length > 0) });
+  TRAY.counted.delete(r.id);
+  if (ev.type === 'grit') TRAY.gritPulse = performance.now();
+  renderLog();
+}
+function settleOf(id) {
+  const se = TRAY.settle.get(id);
+  if (!se) return null;
+  const age = Math.round(performance.now() - se.at);
+  if (age > 2600) { TRAY.settle.delete(id); return null; }
+  return { ...se, age };
+}
+// Totals count up (or down, after a bad reroll) once, when an entry lands.
+function countUps() {
+  for (const [id, se] of TRAY.settle) {
+    if (TRAY.counted.has(id)) continue;
+    TRAY.counted.add(id);
+    const r = S.rolls.get(id), el = document.querySelector(`.entry[data-roll="${id}"] .total`);
+    if (!r || !el || se.from === r.total) continue;
+    const from = se.from, to = r.total, t0 = performance.now(), dur = Math.min(700, 120 + Math.abs(to - from) * 45);
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur), v = Math.round(from + (to - from) * (1 - Math.pow(1 - k, 2)));
+      if (!el.isConnected) return;
+      el.textContent = v.toLocaleString();
+      if (k < 1) requestAnimationFrame(step);
+    };
+    el.textContent = from.toLocaleString();
+    setTimeout(() => requestAnimationFrame(step), 150);
+  }
+}
+
+function trayDie(v, sides, grit) {
+  const e = document.createElement('span');
+  e.className = 'tdie ' + (v === 1 ? 'one ' : v === sides ? 'max ' : '') + (grit ? 'grit ' : '') + (sides === 6 ? 'cube' : 'poly');
+  if (sides === 6 && v >= 1 && v <= 6) e.innerHTML = `<span class="pp">${dotsHTML(v)}</span>`;
+  else {
+    e.textContent = v;
+    if (DIE_SHAPES[sides]) { e.style.clipPath = DIE_SHAPES[sides]; e.classList.add('shaped', 'd' + sides); }
+  }
+  return e;
+}
+const rnd = sides => 1 + Math.floor(Math.random() * sides);
+
+// Dice fly in, bounce, spin and settle on their values.
+function tumbleIn(tray, items, opts = {}) {
+  const W = tray.clientWidth, H = tray.clientHeight, n = items.length;
+  const size = n > 5 ? 34 : 44, gap = Math.min(size + 12, (W - 24) / Math.max(1, n));
+  const startX = opts.from ?? -60, x0 = (opts.center ?? W / 2) - ((n - 1) * gap) / 2 - size / 2;
+  let longest = 0;
+  items.forEach((it, i) => {
+    const e = trayDie(rnd(it.sides), it.sides, it.grit);
+    e.style.setProperty('--sz', size + 'px');
+    tray.appendChild(e);
+    const ex = x0 + i * gap, ey = H / 2 - size / 2 + (Math.random() * 10 - 5), sy = Math.random() * H * 0.5;
+    const kf = [];
+    for (let k = 0; k <= 8; k++) {
+      const t = k / 8, a = 1 - Math.pow(1 - t, 3);
+      kf.push({ transform: `translate(${startX + (ex - startX) * a}px, ${sy + (ey - sy) * a - Math.abs(Math.sin(t * Math.PI * 2.5)) * 30 * (1 - t)}px) rotate(${(1 - a) * 640 + i * 25}deg)` });
+    }
+    const flick = setInterval(() => { const f = trayDie(rnd(it.sides), it.sides, it.grit); e.className = f.className; e.innerHTML = f.innerHTML; e.style.clipPath = f.style.clipPath; }, 85);
+    const dur = 820 + i * 100;
+    longest = Math.max(longest, dur);
+    e.animate(kf, { duration: dur, easing: 'linear', fill: 'forwards' }).onfinish = () => {
+      clearInterval(flick);
+      const f = trayDie(it.v, it.sides, it.grit);
+      f.style.setProperty('--sz', size + 'px');
+      f.style.transform = `translate(${ex}px, ${ey}px)`;
+      if (opts.gold) f.classList.add('gold');
+      e.replaceWith(f);
+    };
+  });
+  return longest;
+}
+function placeStill(tray, items, cls, centerX) {
+  const H = tray.clientHeight, n = items.length, size = n > 5 ? 34 : 44, gap = size + 10;
+  const x0 = centerX - ((n - 1) * gap) / 2 - size / 2;
+  return items.map((it, i) => {
+    const e = trayDie(it.v, it.sides, it.grit);
+    e.style.setProperty('--sz', size + 'px');
+    e.style.transform = `translate(${x0 + i * gap}px, ${H / 2 - size / 2}px)`;
+    if (cls) e.classList.add(cls);
+    tray.appendChild(e);
+    return { e, x: x0 + i * gap, y: H / 2 - size / 2 };
+  });
+}
+
+function animateTray(ev, r) {
+  return new Promise(resolve => {
+    const wrap = $('#tray-wrap'), tray = $('#tray'), lbl = $('#tray-lbl');
+    if (!wrap || !tray) return resolve();
+    tray.querySelectorAll('.tdie').forEach(d => d.remove());
+    wrap.classList.add('open');
+    const W = tray.clientWidth, cap = 8;
+    const asItems = (dice, sides, grit) => dice.slice(0, cap).map(v => ({ v, sides, grit }));
+    const who = r.who || 'GM', dbl = isDoubles(r) && r.kind !== 'grit_session';
+    let wait = 0;
+    if (ev.type === 'roll') {
+      lbl.textContent = `${who} · ${r.label || 'Roll'}${r.dice.length > cap ? ` · showing ${cap} of ${r.dice.length} dice` : ''}`;
+      clack(Math.min(r.dice.length, 4));
+      wait = tumbleIn(tray, asItems(r.dice, r.sides), { gold: dbl }) + 450;
+    } else if (ev.type === 'grit') {
+      const g = (r.extras || [])[r.extras.length - 1];
+      lbl.textContent = `${g ? g.who : 'Someone'} adds a Grit die to ${who}’s roll`;
+      placeStill(tray, asItems(ev.before.dice, ev.before.sides), 'dim', W * 0.36);
+      clack(1);
+      wait = tumbleIn(tray, [{ v: g ? g.die : 1, sides: 6, grit: true }], { from: W + 20, center: W * 0.78 }) + 450;
+    } else {
+      const h = (r.history || [])[r.history.length - 1];
+      lbl.textContent = `${h ? h.who : who} spends 1 Wear to reroll`;
+      const old = placeStill(tray, asItems(ev.before.dice, ev.before.sides), '', W / 2);
+      old.forEach((o, i) => o.e.animate(
+        [{ transform: `translate(${o.x}px, ${o.y}px)`, opacity: 1 }, { transform: `translate(${o.x + W}px, ${o.y - 18}px) rotate(110deg)`, opacity: 0 }],
+        { duration: 420, delay: 160 + i * 50, easing: 'ease-in', fill: 'forwards' }));
+      const items = asItems(r.dice, r.sides);
+      const gNew = (r.extras || [])[0], gOld = (ev.before.extras || [])[0];
+      if (gNew && gOld && S.settings.reroll_grit && gNew.die !== gOld.die) items.push({ v: gNew.die, sides: 6, grit: true });
+      setTimeout(() => { clack(Math.min(items.length, 4)); tumbleIn(tray, items, { gold: dbl }); }, 520);
+      wait = 520 + 820 + items.length * 100 + 450;
+    }
+    setTimeout(resolve, wait);
+  });
+}
+
+// A short rattle made on the fly (no sound files).
+let audioCtx = null;
+function clack(n) {
+  if (!S.sound) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    if (audioCtx.state !== 'running') return;
+    const hits = 2 + n * 2;
+    for (let k = 0; k < hits; k++) {
+      const t = audioCtx.currentTime + k * 0.075 + Math.random() * 0.03;
+      const len = Math.floor(audioCtx.sampleRate * 0.03), b = audioCtx.createBuffer(1, len, audioCtx.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 4);
+      const src = audioCtx.createBufferSource(), f = audioCtx.createBiquadFilter(), g = audioCtx.createGain();
+      f.type = 'bandpass'; f.frequency.value = 1700 + Math.random() * 1600;
+      g.gain.value = 0.3 * (1 - k / hits);
+      src.buffer = b; src.connect(f).connect(g).connect(audioCtx.destination); src.start(t);
+    }
+  } catch { /* no audio */ }
+}
+// Browsers only allow sound after a click; wake the audio on the first one.
+document.addEventListener('pointerdown', () => {
+  if (!S.sound || audioCtx) return;
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* no audio */ }
+}, { once: true, capture: true });
+
 // ── Sync ───────────────────────────────────────────────────────────────────
 
 function sheetRecord(rec) {
@@ -460,10 +669,16 @@ function applyRoll(r) {
   const cur = S.rolls.get(r.id);
   if (cur && cur.updated_at === r.updated_at) return false;
   if (S.ready) {
-    if (!cur) { S.anim.add(r.id + ':dice'); if ((r.extras || []).length) S.anim.add(r.id + ':grit'); }
-    else {
-      if (cur.dice.join() !== r.dice.join() || (cur.history || []).length !== (r.history || []).length) S.anim.add(r.id + ':dice');
-      if (JSON.stringify(cur.extras) !== JSON.stringify(r.extras)) S.anim.add(r.id + ':grit');
+    // The dice tray plays new rolls, Grit dice and Wear rerolls; the log entry
+    // waits until the dice land. Without the tray, the log dice tumble instead.
+    const type = !cur ? 'roll' : (r.history || []).length > (cur.history || []).length ? 'reroll'
+      : (r.extras || []).length > (cur.extras || []).length ? 'grit' : null;
+    if (!type || !trayEvent(type, cur, r)) {
+      if (!cur) { S.anim.add(r.id + ':dice'); if ((r.extras || []).length) S.anim.add(r.id + ':grit'); }
+      else {
+        if (cur.dice.join() !== r.dice.join() || (cur.history || []).length !== (r.history || []).length) S.anim.add(r.id + ':dice');
+        if (JSON.stringify(cur.extras) !== JSON.stringify(r.extras)) S.anim.add(r.id + ':grit');
+      }
     }
   }
   S.rolls.set(r.id, r);
@@ -672,10 +887,12 @@ async function roll({ sheetId = null, label, kind = 'free', n = 2, sides = 6, pa
       p_parts: parts, p_private: S.private,
     });
     applyRoll(r);
-    S.anim.add(r.id + ':dice');
+    const trayed = TRAY.hold.has(r.id) || TRAY.settle.has(r.id);
+    if (!trayed) S.anim.add(r.id + ':dice');
     ping();
     renderLog();
-    if (r.wear_marked === 1) toast(`Doubles! ${r.who} banks 1 Wear.`);
+    if (trayed) { /* the tray and the log entry show it */ }
+    else if (r.wear_marked === 1) toast(`Doubles! ${r.who} banks 1 Wear.`);
     else if (window.matchMedia('(max-width: 1100px)').matches && !S.logOpen) {
       toast(`${r.who} · ${r.label}: ${r.total}${isDoubles(r) ? ' · doubles!' : ''}`);
     }
@@ -2901,14 +3118,24 @@ function breakdownHTML(r) {
 }
 
 function entryHTML(r) {
+  // While the tray plays a Grit die or a reroll, the entry keeps its old state.
+  const held = TRAY.hold.get(r.id);
+  if (held) r = held.row;
+  const se = held ? null : settleOf(r.id);
   const rec = r.sheet_id && S.sheets.get(r.sheet_id);
   const accent = rec ? accentOf(rec) : 'var(--line)';
   const dbl = isDoubles(r) && r.kind !== 'grit_session';
-  const animDice = S.anim.has(r.id + ':dice'), animGrit = S.anim.has(r.id + ':grit');
-  // A 1 is red, the top face (6 on a d6) is green.
+  const animDice = !held && !se && S.anim.has(r.id + ':dice'), animGrit = !held && !se && S.anim.has(r.id + ':grit');
+  const el = se ? `--el:-${se.age}ms;` : '';
+  // A 1 is red, the top face (6 on a d6) is green. Freshly landed d6s show
+  // their pips for a beat, then fade into the number.
   const face = (v, sides) => (v === 1 ? 'one' : v === sides ? 'max' : '');
-  const dice = r.dice.map((v, i) => `<span class="die ${face(v, r.sides)} ${dbl ? 'dbl' : ''} ${animDice ? 'tumble' : ''}" style="--i:${i}">${v}</span>`).join('');
-  const grit = (r.extras || []).map(e => `<span class="die grit ${face(e.die, 6)} ${animGrit ? 'tumble' : ''}" title="Grit from ${esc(e.who)}">${e.die}</span>`).join('');
+  const inner = (v, sides, on) => (on && sides === 6 && v >= 1 && v <= 6 ? `<span class="pp">${dotsHTML(v)}</span><span class="num">${v}</span>` : v);
+  const settleCls = (on, sides) => (on ? (sides === 6 ? 'settle' : 'settle-n') : '');
+  const gone = held && held.type === 'reroll' ? 'gone' : '';
+  const sd = se && se.dice, sg = se && se.grit;
+  const dice = r.dice.map((v, i) => `<span class="die ${face(v, r.sides)} ${dbl ? 'dbl' : ''} ${animDice ? 'tumble' : ''} ${settleCls(sd, r.sides)} ${gone}" style="--i:${i};${el}">${inner(v, r.sides, sd)}</span>`).join('');
+  const grit = (r.extras || []).map(e => `<span class="die grit ${face(e.die, 6)} ${animGrit ? 'tumble' : ''} ${settleCls(sg, 6)} ${gone && S.settings.reroll_grit ? 'gone' : ''}" style="--i:${r.dice.length};${el}" title="Grit from ${esc(e.who)}">${inner(e.die, 6, sg)}</span>`).join('');
   const mods = (r.parts || []).map(p => `<span class="mod-inline" title="${esc(p.label)}">${signed(+p.value)}</span>`).join('');
 
   const tags = [];
@@ -2923,8 +3150,8 @@ function entryHTML(r) {
   if (r.kind === 'grit_session') tags.push('<span class="tag brass">Grit pool set</span>');
 
   const ed = rec && canEdit(rec);
-  const canGrit = r.sides === 6 && r.kind !== 'grit_session' && !(r.extras || []).length && S.grit > 0;
-  const canReroll = ed && r.kind !== 'grit_session' && rec.data.wear >= 1;
+  const canGrit = !held && r.sides === 6 && r.kind !== 'grit_session' && !(r.extras || []).length && S.grit > 0;
+  const canReroll = !held && ed && r.kind !== 'grit_session' && rec.data.wear >= 1;
   const actions = (canGrit || canReroll) ? `
     <div class="entry-actions">
       ${canGrit ? `<button class="btn" data-act="spend-grit" data-id="${r.id}" title="Spend 1 Grit to add 1d6">+ Grit 1d6</button>` : ''}
@@ -2933,8 +3160,10 @@ function entryHTML(r) {
 
   const fresh = S.ready && !S.seenRolls.has(r.id) ? 'fresh' : '';
   S.seenRolls.add(r.id);
+  const landDbl = se && se.dice && dbl;
   return `
-    <article class="entry ${fresh} ${r.private ? 'is-private' : ''}" style="--accent:${esc(accent)}">
+    <article class="entry ${fresh} ${r.private ? 'is-private' : ''} ${landDbl ? 'dbl-land' : ''}" data-roll="${r.id}" style="--accent:${esc(accent)};${el}">
+      ${landDbl ? '<span class="dbl-stamp" aria-hidden="true">Doubles</span>' : ''}
       <div class="entry-top">
         ${rollerAvatar(r)}
         <div class="entry-who"><b>${esc(r.who || 'GM')}</b><span class="entry-label">${esc(r.label || 'Roll')}</span></div>
@@ -2958,9 +3187,16 @@ function renderLog() {
   const focusId = document.activeElement && document.activeElement.id;
   const mr = S.mr;
   log.className = 'log' + (S.logOpen ? ' open' : '');
-  log.innerHTML = `
-    <div class="log-head">
-      <h2><span class="grow">Dice</span><span class="tag brass" title="Shared Grit pool">Grit ${S.grit}/10</span>
+  // The tray lives between the controls and the list and survives re-renders.
+  if (!$('#log-head')) {
+    log.innerHTML = `<div class="log-head" id="log-head"></div>
+      <div class="tray-wrap" id="tray-wrap" aria-hidden="true"><div class="tray" id="tray"><span class="tray-lbl" id="tray-lbl"></span></div></div>
+      <div class="log-list" id="log-list"></div>`;
+  }
+  const gp = TRAY.gritPulse && performance.now() - TRAY.gritPulse < 900 ? `pulse" style="--el:-${Math.round(performance.now() - TRAY.gritPulse)}ms` : '';
+  $('#log-head').innerHTML = `
+      <h2><span class="grow">Dice</span><span class="tag brass ${gp}" title="Shared Grit pool">Grit ${S.grit}/10</span>
+        <button class="icon-btn sound-btn ${S.sound ? 'on' : ''}" data-act="sound" aria-pressed="${S.sound}" aria-label="Dice sound" title="${S.sound ? 'Dice sound on' : 'Dice sound off'}">${S.sound ? SOUND_ON_SVG : SOUND_OFF_SVG}</button>
         <button class="icon-btn log-close" data-act="log-toggle" aria-label="Close dice">×</button></h2>
       <div class="vis-toggle" role="radiogroup" aria-label="Who sees your rolls">
         <button class="${S.private ? '' : 'on'}" data-act="vis" data-v="0" role="radio" aria-checked="${!S.private}">Public</button>
@@ -2982,11 +3218,9 @@ function renderLog() {
         </form>
         <div class="small dim" id="mr-hint">${mrHint('')}</div>
       </div>
-      <div class="small dim">Rolling as <b style="color:var(--paper)">${esc(myName())}</b>${S.private ? ' · <span class="warn">private</span>' : ''}</div>
-    </div>
-    <div class="log-list" id="log-list">
-      ${rolls.length ? rolls.map(entryHTML).join('') : '<p class="log-empty">No rolls yet. Click a stat on your sheet or roll here.</p>'}
-    </div>`;
+      <div class="small dim">Rolling as <b style="color:var(--paper)">${esc(myName())}</b>${S.private ? ' · <span class="warn">private</span>' : ''}</div>`;
+  const shown = rolls.filter(r => TRAY.hold.get(r.id) !== null);   // null = still in the tray
+  $('#log-list').innerHTML = shown.length ? shown.map(entryHTML).join('') : '<p class="log-empty">No rolls yet. Click a stat on your sheet or roll here.</p>';
   S.anim.clear();
   $('#log-list').scrollTop = scroll;
   $('#mr-label').value = label;
@@ -2994,7 +3228,8 @@ function renderLog() {
   if (focusId === 'mr-label') $('#mr-label').focus();
   $('#mr-form').onsubmit = e => { e.preventDefault(); rollerSubmit($('#mr-label').value); };
   const fab = $('#fab-last');
-  if (fab) fab.textContent = rolls[0] ? rolls[0].total : '';
+  if (fab) fab.textContent = shown[0] ? shown[0].total : '';
+  countUps();
 }
 
 // The roller input is either a formula ("2d6+wits+perception") or a label
@@ -3469,7 +3704,9 @@ document.addEventListener('click', async e => {
       el.disabled = true;
       try {
         const r = await api('spend_grit', { p_roll: +el.dataset.id });
-        applyRoll(r); S.anim.add(r.id + ':grit'); S.grit = Math.max(0, S.grit - 1);
+        applyRoll(r);
+        if (!TRAY.hold.has(r.id) && !TRAY.settle.has(r.id)) S.anim.add(r.id + ':grit');
+        S.grit = Math.max(0, S.grit - 1);
         ping(); renderLog(); refreshMain(new Set(), true); sync();
       } catch (err) { fail(err); el.disabled = false; }
       break;
@@ -3479,11 +3716,13 @@ document.addEventListener('click', async e => {
       try {
         const before = S.rolls.get(+el.dataset.id);
         const r = await api('reroll', { p_roll: +el.dataset.id });
-        applyRoll(r); S.anim.add(r.id + ':dice'); if (S.settings.reroll_grit && (r.extras || []).length) S.anim.add(r.id + ':grit');
+        applyRoll(r);
+        const trayed = TRAY.hold.has(r.id) || TRAY.settle.has(r.id);
+        if (!trayed) { S.anim.add(r.id + ':dice'); if (S.settings.reroll_grit && (r.extras || []).length) S.anim.add(r.id + ':grit'); }
         ping();
         if (before) await afterReroll(before, r);
         renderLog(); await sync();
-        toast(`Rerolled with 1 Wear: ${r.total}${r.wear_marked === 1 && isDoubles(r) ? ' · doubles, +1 Wear banked' : ''}`);
+        if (!trayed) toast(`Rerolled with 1 Wear: ${r.total}${r.wear_marked === 1 && isDoubles(r) ? ' · doubles, +1 Wear banked' : ''}`);
       } catch (err) { fail(err); el.disabled = false; }
       break;
     }
@@ -3543,6 +3782,13 @@ document.addEventListener('click', async e => {
       if (!confirm(`Delete the scene “${sc ? sc.title || 'Untitled' : ''}”?`)) break;
       try { await api('gm_scene_delete', { p_id: el.dataset.id }); ping(); await loadScenes(); sync(); }
       catch (err) { fail(err); }
+      break;
+    }
+
+    case 'sound': {
+      S.sound = !S.sound; lsSet('debt.sound', S.sound ? '1' : '0');
+      renderLog();
+      if (S.sound) clack(2);
       break;
     }
 

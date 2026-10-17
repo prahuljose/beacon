@@ -1263,3 +1263,52 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 .stats-table th:first-child button { text-align: left; cursor: default; }
 .stats-table td.lead.bad { color: #e07b6f; }
 .tl-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto auto; }
+
+/* v12: dice tray (felt, in the dice panel) and landing dice in the log. */
+.tray-wrap { height: 0; overflow: hidden; transition: height .35s ease; flex: none; }
+.tray-wrap.open { height: 128px; border-bottom: 1px solid var(--line); }
+.tray { position: relative; margin: 9px 12px; height: 108px; border: 2px solid var(--brass); border-radius: 10px; overflow: hidden;
+  background: radial-gradient(ellipse at 50% 40%, #24463a 0%, #1d3a2c 55%, #16301f 100%); box-shadow: inset 0 0 0 4px #14281f, inset 0 6px 14px rgba(0,0,0,.45); }
+.tray::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(255,255,255,.012) 0 2px, transparent 2px 5px); }
+.tray-lbl { position: absolute; left: 10px; bottom: 5px; z-index: 2; font-size: 11px; color: rgba(230,223,203,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 20px); }
+.tdie { --sz: 44px; position: absolute; left: 0; top: 0; width: var(--sz); height: var(--sz); display: flex; align-items: center; justify-content: center;
+  font-family: var(--slab); font-size: calc(var(--sz) * .44); color: #1b1f22; background: var(--paper); will-change: transform; }
+.tdie.cube { border-radius: calc(var(--sz) * .2); box-shadow: inset -3px -4px 0 rgba(0,0,0,.18), inset 2px 2px 0 rgba(255,255,255,.5), 0 4px 8px rgba(0,0,0,.35); }
+.tdie.poly:not(.shaped) { border-radius: calc(var(--sz) * .22); }
+.tdie.d4, .tdie.d10 { padding-top: calc(var(--sz) * .16); }
+.tdie.one { background: #c0392b; color: #fff; } .tdie.max { background: #2e8b57; color: #fff; }
+.tdie.grit:not(.one):not(.max) { background: var(--brass); }
+.tdie.grit.cube { box-shadow: 0 0 0 3px #8a6d2c, inset -3px -4px 0 rgba(0,0,0,.18), 0 4px 8px rgba(0,0,0,.35); }
+.tdie.gold { box-shadow: 0 0 0 2px #1d3a2c, 0 0 0 4px #f5c542, 0 4px 8px rgba(0,0,0,.35); }
+.tdie.dim { opacity: .45; }
+.tdie .pp, .die .pp { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); place-items: center; }
+.tdie .pp { position: absolute; inset: calc(var(--sz) * .16); }
+.tdie .pp i, .die .pp i { width: calc(var(--sz, 28px) * .15); height: calc(var(--sz, 28px) * .15); border-radius: 50%; background: #1b1f22; }
+.tdie.one .pp i, .tdie.max .pp i, .die.one .pp i, .die.max .pp i { background: #fff; }
+.tdie .pp i.off, .die .pp i.off { visibility: hidden; }
+
+/* Landing in the log: pips first, then the number. --el rewinds the clock after a re-render. */
+.die.settle { position: relative; }
+.die.settle .pp { position: absolute; inset: 4px; animation: pips-out .35s ease forwards; animation-delay: calc(950ms + var(--i, 0) * 130ms + var(--el, 0ms)); }
+.die.settle .pp i { width: 4px; height: 4px; }
+.die.settle .num { opacity: 0; animation: num-in .35s ease forwards; animation-delay: calc(950ms + var(--i, 0) * 130ms + var(--el, 0ms)); }
+.die.settle-n { animation: num-pop .4s cubic-bezier(.3,1.5,.5,1) backwards; animation-delay: calc(var(--i, 0) * 80ms + var(--el, 0ms)); }
+@keyframes pips-out { to { opacity: 0; transform: scale(1.25); } }
+@keyframes num-in { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: none; } }
+@keyframes num-pop { from { opacity: 0; transform: translateY(-10px) scale(.6); } }
+.die.gone { opacity: .35; filter: grayscale(1); transform: scale(.85); transition: all .35s; }
+.entry { position: relative; }
+.entry.dbl-land { animation: dbl-shake .4s ease-out backwards; animation-delay: calc(200ms + var(--el, 0ms)); }
+@keyframes dbl-shake { 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+.dbl-stamp { position: absolute; right: 10px; top: 40px; z-index: 1; pointer-events: none; font-family: var(--slab); font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+  color: #f5c542; border: 2px solid #f5c542; border-radius: 4px; padding: 0 7px; background: rgba(35,43,48,.85);
+  transform: rotate(-8deg); animation: stamp-in .45s cubic-bezier(.3,1.6,.5,1) backwards, stamp-out .5s ease 2.2s forwards; animation-delay: calc(250ms + var(--el, 0ms)), calc(2400ms + var(--el, 0ms)); }
+@keyframes stamp-in { from { transform: rotate(-8deg) scale(0); opacity: 0; } }
+@keyframes stamp-out { to { opacity: 0; transform: rotate(-8deg) scale(.9); } }
+.tag.pulse { animation: grit-pulse .6s ease-out backwards; animation-delay: var(--el, 0ms); }
+@keyframes grit-pulse { 0% { transform: scale(1.35); background: rgba(245,197,66,.3); } }
+.sound-btn { color: var(--faint); margin-left: 4px; } .sound-btn.on { color: var(--brass); }
+@media (prefers-reduced-motion: reduce) {
+  .die.settle .pp { display: none; } .die.settle .num { opacity: 1; animation: none; }
+  .die.settle-n, .entry.dbl-land, .tag.pulse { animation: none; } .dbl-stamp { display: none; }
+}
