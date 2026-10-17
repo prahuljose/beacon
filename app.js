@@ -820,8 +820,8 @@ function renderApp() {
     <header class="top">
       <a class="brand" href="#/crew">DEBT</a>
       <div class="clock-wrap" id="clock"></div>
-      <div class="online-wrap" id="online"></div>
       <nav class="nav" id="nav"></nav>
+      <div class="online-wrap" id="online"></div>
       <div class="me" id="me"></div>
     </header>
     <div class="layout">

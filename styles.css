@@ -1138,3 +1138,9 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
   .oc-faces .avatar.xs:nth-child(n+3) { display: none; }
   .online-pop { position: fixed; left: 12px; right: 12px; top: 96px; width: auto; }
 }
+
+/* Online chip sits on the right, just before the signed-in chip; its list opens leftwards. */
+.online-wrap { margin-left: auto; }
+.online-wrap + .me { margin-left: 10px; }
+.online-pop { left: auto; right: 0; }
+@media (max-width: 900px) { .online-wrap + .me { margin-left: auto; } }   /* when the bar wraps, keep Log out on the right */

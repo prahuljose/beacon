@@ -20,6 +20,9 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 11 (2026-10-18)
+- [x] Moved the online chip to the right of the top bar, just before the signed-in chip; its list opens leftwards. On narrow screens Log out stays right-aligned on the second row. Checked desktop + phone. Deployed `?v=12`.
+
 ## Round 10 request (2026-10-18): players online
 - [x] Top-bar chip "N / M online" with overlapping portraits. M counts only characters with a login. Clicking it lists GM + every character: Online (tab in front), Away (tab in background), Offline, No login yet.
 - [x] Built on Supabase Realtime Presence over the existing channel. Each tab tracks { role, sheet_id, away } with its own key. Several tabs on one character count once, and any foreground tab wins. Log out untracks; closing the tab drops off within seconds; a dead connection times out (~30 s).
