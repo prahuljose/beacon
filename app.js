@@ -295,7 +295,9 @@ function connectRealtime() {
   try {
     if (channel || !window.supabase) return;
     const client = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false } });
-    channel = client.channel('debt-crew', { config: { broadcast: { self: false } } });
+    // Local testing uses its own channel, so test logins never show as "online" to the real crew.
+    const name = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? 'debt-crew-dev' : 'debt-crew';
+    channel = client.channel(name, { config: { broadcast: { self: false }, presence: { key: TAB_ID } } });
     let t = null;
     channel.on('broadcast', { event: 'ping' }, () => { clearTimeout(t); t = setTimeout(sync, 120); });
     channel.on('broadcast', { event: 'draft' }, ({ payload: p }) => {
@@ -311,9 +313,72 @@ function connectRealtime() {
       sync().then(() => { S.drafts.delete(p.did); redrawScene(p.scene); });
     });
     channel.on('broadcast', { event: 'loc' }, ({ payload: p }) => showLocPing(p));
-    channel.subscribe();
+    channel.on('presence', { event: 'sync' }, () => { S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); });
+    channel.subscribe(status => {
+      S.rtLive = status === 'SUBSCRIBED';
+      if (S.rtLive) trackPresence();
+      renderOnline();
+    });
   } catch { channel = null; /* polling still works */ }
 }
+// ── Who's online (Realtime Presence) ───────────────────────────────────────
+// Each open tab announces who it's logged in as and whether it's in the
+// foreground. Closing the tab removes it; a dropped connection times out.
+
+const TAB_ID = Math.random().toString(36).slice(2, 12);
+function trackPresence() {
+  if (!channel || !S.rtLive || !S.me) return;
+  try { channel.track({ role: S.me.role, sheet_id: S.me.sheet_id || null, away: document.hidden }); } catch { /* not joined yet */ }
+}
+function untrackPresence() { try { if (channel) channel.untrack(); } catch { /* ignore */ } }
+
+// id ('gm' or a sheet id) -> 'online' | 'away'. Any foreground tab wins.
+function presenceMap() {
+  const m = new Map();
+  for (const metas of Object.values(S.presence || {})) {
+    for (const p of metas || []) {
+      const id = p.role === 'gm' ? 'gm' : p.sheet_id;
+      if (!id) continue;
+      if (m.get(id) !== 'online') m.set(id, p.away ? 'away' : 'online');
+    }
+  }
+  return m;
+}
+function statusOf(id, pm) {
+  if (id !== 'gm') { const r = S.sheets.get(id); if (r && r.has_pass === false) return 'nologin'; }
+  return pm.get(id) || 'offline';
+}
+const STATUS_LABEL = { online: 'Online', away: 'Away', offline: 'Offline', nologin: 'No login yet' };
+
+function renderOnline() {
+  const host = $('#online');
+  if (!host) return;
+  const pm = presenceMap(), sheets = orderedSheets();
+  const here = sheets.filter(r => ['online', 'away'].includes(statusOf(r.id, pm)));
+  const faces = here.slice(0, 4).map(r => avatarHTML(r, 'xs')).join('');
+  const rows = [{ id: 'gm', name: 'Game Master', rec: null }, ...sheets.map(r => ({ id: r.id, name: r.data.name || 'Unnamed', rec: r }))].map(x => {
+    const st = statusOf(x.id, pm);
+    return `
+      <div class="ol-row ${st}">
+        ${x.rec ? avatarHTML(x.rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
+        <span class="ol-name">${esc(x.name)}${(x.id === 'gm' && isGM()) || x.id === mine() ? ' <small class="you">you</small>' : ''}</span>
+        <span class="ol-status"><i class="ol-dot"></i>${STATUS_LABEL[st]}</span>
+      </div>`;
+  }).join('');
+  host.innerHTML = `
+    <button class="online-chip ${S.rtLive ? '' : 'unknown'}" data-act="online-toggle" aria-expanded="${!!S.onlineOpen}"
+      title="${S.rtLive ? 'Who’s online right now' : 'Connecting to live status…'}">
+      <span class="oc-faces">${faces || '<i class="ol-dot"></i>'}</span>
+      <span class="oc-count">${S.rtLive ? `${here.length} / ${sheets.filter(r => r.has_pass !== false).length}` : '…'}</span><span class="oc-label">online</span>
+    </button>
+    ${S.onlineOpen ? `
+    <div class="online-pop" role="dialog" aria-label="Who’s online">
+      <div class="op-head"><b>Who’s here</b><span class="small dim">${S.rtLive ? 'Live' : 'Connecting…'}</span></div>
+      ${rows}
+      <p class="op-key small dim"><i class="ol-dot k-online"></i>Online <i class="ol-dot k-away"></i>Away (tab in background) <i class="ol-dot k-offline"></i>Offline</p>
+    </div>` : ''}`;
+}
+
 function send(event, payload) {
   try { if (channel) channel.send({ type: 'broadcast', event, payload }); } catch { /* ignore */ }
 }
@@ -418,8 +483,8 @@ async function sync() {
 
     if (isGM() && r.scenes_sig !== S.scenesSig) { S.scenesSig = r.scenes_sig; loadScenes(); }
 
-    if (!S.ready) { S.ready = true; renderApp(); return; }
-    if (changed.size) renderNav();
+    if (!S.ready) { S.ready = true; renderApp(); trackPresence(); return; }
+    if (changed.size) { renderNav(); renderOnline(); }
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);
     if (rulesChanged && S.route.view === 'rules') refreshMain(new Set(), true);
     if (crewChanged) renderClock();
@@ -464,7 +529,7 @@ function startPolling() {
   clearInterval(pollTimer);
   pollTimer = setInterval(() => { if (!document.hidden) sync(); }, POLL_MS);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ready) sync(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ready) sync(); trackPresence(); });
 
 // ── Saving edits ───────────────────────────────────────────────────────────
 
@@ -734,8 +799,9 @@ async function renderLogin(msg) {
 
 async function signOut(msg) {
   const tok = S.token;
+  untrackPresence();
   S.token = ''; lsSet('debt.token', null);
-  S.me = null; S.ready = false; S.since = null;
+  S.me = null; S.ready = false; S.since = null; S.onlineOpen = false;
   S.sheets.clear(); S.rolls.clear(); S.vault.clear(); S.vaultLoaded = false;
   S.live = []; S.liveKnown = null; S.scenes = null; S.scenesSig = null;
   S.strokes.clear(); S.strokesLoaded.clear(); S.chat = [];
@@ -754,6 +820,7 @@ function renderApp() {
     <header class="top">
       <a class="brand" href="#/crew">DEBT</a>
       <div class="clock-wrap" id="clock"></div>
+      <div class="online-wrap" id="online"></div>
       <nav class="nav" id="nav"></nav>
       <div class="me" id="me"></div>
     </header>
@@ -768,6 +835,7 @@ function renderApp() {
     <input type="file" id="file-scene" accept="image/*" hidden>`;
   renderNav();
   renderClock();
+  renderOnline();
   renderMain();
   renderLog();
   renderScenes();
@@ -2741,8 +2809,10 @@ document.addEventListener('click', async e => {
   if (!el || el.disabled) {
     if (S.vaultMenu && !e.target.closest('.v-menu')) { S.vaultMenu = null; renderVaultViews(); }
     if (S.clockOpen && !e.target.closest('.clock-wrap')) { S.clockOpen = false; renderClock(); }
+    if (S.onlineOpen && !e.target.closest('.online-wrap')) { S.onlineOpen = false; renderOnline(); }
     return;
   }
+  if (S.onlineOpen && !el.closest('.online-wrap')) { S.onlineOpen = false; renderOnline(); }
   if (S.clockOpen && !el.closest('.clock-wrap')) { S.clockOpen = false; renderClock(); }
   const act = el.dataset.act;
   const rec = currentSheet(el);
@@ -2753,6 +2823,7 @@ document.addEventListener('click', async e => {
   switch (act) {
     // Shell
     case 'logout': signOut(); break;
+    case 'online-toggle': S.onlineOpen = !S.onlineOpen; renderOnline(); break;
     case 'clock-toggle': S.clockOpen = !S.clockOpen; renderClock(); break;
     case 'clock-day': setClock(c => { c.day = Math.max(1, c.day + dd); }); break;
     case 'clock-time': setClock(c => { shiftClock(c, dd); }); break;

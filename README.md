@@ -14,6 +14,7 @@ sheets, a shared dice log, the Grit pool, Wear rerolls, scenes and the Vault.
 
 ## What's in it
 
+- **Who's online.** A top-bar chip with Online / Away / Offline / No login yet for everyone (Realtime Presence).
 - **In-game clock.** Day and time in the top bar for everyone. Only the GM sets it.
 - **Crew board.**
   - Shared Grit pool: anyone can add, remove or spend Grit. The session roll is once per session, and the GM reopens it.
@@ -48,7 +49,7 @@ polling as a backup.
 - Static `index.html` + `styles.css` + `app.js`. No build step. Vercel serves
   the repo as-is on every push to `main`.
 - Data lives in the Supabase project **beacon** (RJ org, ap-south-1).
-  The schema is `supabase/schema.sql` (v2), then `supabase/v3.sql`, `v4.sql` and `v5.sql` on top.
+  The schema is `supabase/schema.sql` (v2), then `supabase/v3.sql`, `v4.sql`, `v5.sql` and `v6.sql` on top.
 - The browser only holds the public Supabase key and a session token. Tables
   are closed to that key. Every call goes through a database function that
   checks the session and the role first.

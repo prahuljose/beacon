@@ -20,6 +20,13 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 10 request (2026-10-18): players online
+- [x] Top-bar chip "N / M online" with overlapping portraits. M counts only characters with a login. Clicking it lists GM + every character: Online (tab in front), Away (tab in background), Offline, No login yet.
+- [x] Built on Supabase Realtime Presence over the existing channel. Each tab tracks { role, sheet_id, away } with its own key. Several tabs on one character count once, and any foreground tab wins. Log out untracks; closing the tab drops off within seconds; a dead connection times out (~30 s).
+- [x] Safety: local dev (localhost/127.0.0.1) joins `debt-crew-dev`, so tests never show to the real crew. Presence is client-reported (fine among friends) and carries no secrets.
+- [x] supabase/v6.sql: sync now returns `has_pass` to everyone (already public via login_options) to drive "No login yet".
+- [x] Tested on the isolated channel with a temporary GM session + throwaway players (Online, Away simulated via visibilitychange, Offline on logout and on tab close, No login yet). Cleaned up. Deployed `?v=11`.
+
 ## Round 9 request (2026-10-18)
 - [x] Drawing Board full screen: a "⤢ Full screen" button in its toolbar (Esc or the button exits). Same 16:7 shape, so existing drawings stay in place, just bigger.
 - [x] Text entry no longer jumps or scrolls: it was an input caught by the global `input { width: 100% }` rule, so it overflowed off the board and focus scrolled the page. Now a textarea sized to its text, clamped inside the board, focused with preventScroll.
