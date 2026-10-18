@@ -750,7 +750,8 @@ async function sync() {
     if (S.rolls.size > 150) {
       [...S.rolls.keys()].sort((a, b) => a - b).slice(0, S.rolls.size - 150).forEach(k => S.rolls.delete(k));
     }
-    for (const m of r.chat) if (!S.chat.some(x => x.id === m.id)) { S.chat.push(m); chatChanged = true; }
+    const newChat = [];
+    for (const m of r.chat) if (!S.chat.some(x => x.id === m.id)) { S.chat.push(m); newChat.push(m); chatChanged = true; }
     if (S.chat.length > 200) S.chat = S.chat.slice(-200);
 
     // Live scenes: new ones pop open for everyone.
@@ -780,13 +781,13 @@ async function sync() {
 
     if (isGM() && r.scenes_sig !== S.scenesSig) { S.scenesSig = r.scenes_sig; loadScenes(); }
 
-    if (!S.ready) { S.ready = true; renderApp(); trackPresence(); return; }
+    if (!S.ready) { initChatSeen(); S.ready = true; renderApp(); trackPresence(); return; }
     if (changed.size) { renderNav(); renderOnline(); refreshTokPickers(); }
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);
     if (rulesChanged && S.route.view === 'rules') refreshMain(new Set(), true);
     if (crewChanged) renderClock();
     if (rollsChanged || crewChanged || changed.size) renderLog();
-    if (chatChanged) renderChat();
+    if (chatChanged) { renderChat(); chatArrived(newChat); }
     if (liveChanged || vaultChanged || changed.size) renderScenes();
     else if (vaultChanged) renderVaultViews();
     for (const id of dirtyScenes) redrawScene(id);
@@ -827,7 +828,7 @@ function startPolling() {
   clearInterval(pollTimer);
   pollTimer = setInterval(() => { if (!document.hidden) sync(); }, POLL_MS);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ready) sync(); trackPresence(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ready) { sync(); if (chatInView()) markChatSeen(); } trackPresence(); });
 
 // ── Saving edits ───────────────────────────────────────────────────────────
 
@@ -1227,6 +1228,7 @@ async function signOut(msg) {
   S.sheets.clear(); S.rolls.clear(); S.vault.clear(); S.vaultLoaded = false;
   S.live = []; S.liveKnown = null; S.scenes = null; S.scenesSig = null;
   S.strokes.clear(); S.strokesLoaded.clear(); S.chat = [];
+  clearChatPops(); setTabAlert(0);
   S.gmNotes = null; S.deleted = null; S.customize = false;
   canvases.clear(); winEls.clear();
   if (tok && !msg) { try { await rpc('logout', { p_token: tok }); } catch { /* already gone */ } }
@@ -1251,6 +1253,7 @@ function renderApp() {
       <aside class="log" id="log" aria-label="Dice"></aside>
     </div>
     <div id="net" class="net-banner" role="status" aria-live="polite"></div>
+    <div id="chat-pops" class="cpops" aria-live="polite"></div>
     <div id="scene-root"><div class="pill-bar" id="pill-bar"></div></div>
     <button class="log-fab" id="log-fab" data-act="log-toggle" aria-label="Open dice">${die(22)}<span id="fab-last"></span></button>
     <input type="file" id="file-portrait" accept="image/*" hidden>
@@ -1367,6 +1370,7 @@ function renderNav() {
       `<a href="#/gm" class="gm-link ${r.view === 'gm' ? 'on' : ''}">GM</a>`,
     ] : []),
   ].join('');
+  renderChatAlerts();
   const me = $('#me');
   const rec = S.sheets.get(mine());
   me.innerHTML = `
@@ -1589,6 +1593,110 @@ function renderChat(force) {
   }).join('') : '<p class="small dim" style="margin:auto">No messages yet.</p>';
   if (nearBottom) list.scrollTop = list.scrollHeight;
 }
+
+// ── Chat alerts: unread badge on Crew, pop-up cards, tab title ─────────────
+// Each login remembers the newest message it has seen (per browser). Messages
+// you sent never count. Being on the Crew page with the tab in front counts
+// as reading the chat.
+
+const chatFromMe = m => (isGM() ? !m.sheet_id : !!m.sheet_id && m.sheet_id === mine());
+const chatSeenKey = () => 'debt.chatSeen.' + (isGM() ? 'gm' : (mine() || 'none'));
+const chatSeen = () => { const v = parseInt(lsGet(chatSeenKey()), 10); return Number.isFinite(v) ? v : 0; };
+const chatMaxId = () => S.chat.reduce((a, m) => Math.max(a, m.id), 0);
+const unreadChat = () => { const seen = chatSeen(); return S.chat.filter(m => m.id > seen && !chatFromMe(m)); };
+const chatInView = () => !!S.me && S.route.view === 'crew' && !document.hidden;
+
+// First visit on this browser: start from now, not from the whole history.
+function initChatSeen() {
+  if (lsGet(chatSeenKey()) == null) lsSet(chatSeenKey(), String(chatMaxId()));
+}
+function markChatSeen() {
+  const max = chatMaxId();
+  if (max > chatSeen()) lsSet(chatSeenKey(), String(max));
+  renderChatAlerts();
+}
+// New messages from a sync: read them if the chat is on screen, otherwise pop them up.
+function chatArrived(list) {
+  if (!S.ready || !list.length) return;
+  if (chatInView()) { markChatSeen(); return; }
+  list.filter(m => !chatFromMe(m) && m.id > chatSeen()).forEach(chatPop);
+  renderChatAlerts();
+}
+
+function renderChatAlerts() {
+  if (!S.me) return setTabAlert(0);
+  const un = unreadChat(), n = un.length, priv = un.some(m => m.private);
+  const link = document.querySelector('#nav a[href="#/crew"]');
+  if (link) {
+    let b = link.querySelector('.nav-badge');
+    if (!n) { if (b) b.remove(); }
+    else {
+      const label = n > 9 ? '9+' : String(n);
+      if (!b) { b = document.createElement('span'); b.className = 'nav-badge'; link.appendChild(b); }
+      if (b.textContent !== label) { b.textContent = label; b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+      b.classList.toggle('priv', priv);
+      b.title = `${n} unread message${n === 1 ? '' : 's'}${priv ? ', including a private one' : ''}`;
+    }
+  }
+  setTabAlert(n);
+}
+
+// "(3) Debt" in the tab title and a red dot on the tab icon.
+let baseIcon = null;
+function setTabAlert(n) {
+  document.title = n ? `(${n > 9 ? '9+' : n}) Debt` : 'Debt';
+  const icon = document.querySelector('link[rel="icon"]');
+  if (!icon) return;
+  if (baseIcon == null) baseIcon = icon.getAttribute('href');
+  const dotted = baseIcon.replace('</svg>', "<circle cx='25.5' cy='6.5' r='6' fill='%23e5484d' stroke='%23161b1e' stroke-width='2'/></svg>");
+  const want = n ? dotted : baseIcon;
+  if (icon.getAttribute('href') !== want) icon.setAttribute('href', want);
+}
+
+// Pop-up card for one message, bottom right. Click opens the chat.
+function chatPop(m) {
+  const host = $('#chat-pops');
+  if (!host) return;
+  const rec = m.sheet_id && S.sheets.get(m.sheet_id);
+  const color = rec ? accentOf(rec) : GM_COLOR;
+  const text = String(m.body || '').replace(/\s+/g, ' ').trim();
+  const card = document.createElement('div');
+  card.className = 'cpop' + (m.private ? ' priv' : '');
+  card.setAttribute('role', 'button');
+  card.tabIndex = 0;
+  card.style.setProperty('--accent', color);
+  card.innerHTML = `
+    ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
+    <span class="cpop-text">
+      <span class="cpop-head"><b>${esc(m.who || 'Someone')}</b>${m.private ? `<span class="cpop-priv">${EYE_OFF_SVG} Private</span>` : ''}<span class="cpop-time">now</span></span>
+      <span class="cpop-body">${esc(text.length > 140 ? text.slice(0, 140) + '…' : text)}</span>
+    </span>
+    <button type="button" class="cpop-x" aria-label="Dismiss">×</button>`;
+  const close = () => { card.classList.add('out'); setTimeout(() => card.remove(), 250); };
+  let t = setTimeout(close, 6500);
+  card.addEventListener('mouseenter', () => clearTimeout(t));
+  card.addEventListener('mouseleave', () => { clearTimeout(t); t = setTimeout(close, 3000); });
+  card.addEventListener('click', e => {
+    if (e.target.closest('.cpop-x')) { close(); return; }
+    openChat();
+  });
+  card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openChat(); } if (e.key === 'Escape') close(); });
+  host.prepend(card);
+  while (host.children.length > 3) host.lastElementChild.remove();
+}
+function clearChatPops() { const host = $('#chat-pops'); if (host) host.innerHTML = ''; }
+function openChat() {
+  clearChatPops();
+  const go = () => {
+    const list = $('#chat-list'), input = $('#chat-input');
+    if (list) list.closest('.panel') ? list.closest('.panel').scrollIntoView({ block: 'center', behavior: 'smooth' }) : list.scrollIntoView({ block: 'center' });
+    if (input) input.focus({ preventScroll: true });
+    markChatSeen();
+  };
+  if (S.route.view === 'crew') go();
+  else { location.hash = '#/crew'; setTimeout(go, 80); }
+}
+window.addEventListener('storage', e => { if (S.me && e.key === chatSeenKey()) renderChatAlerts(); });
 
 // ── Rendering: character sheet ─────────────────────────────────────────────
 
@@ -4072,6 +4180,7 @@ window.addEventListener('hashchange', () => {
   if (S.logOpen && window.matchMedia('(max-width: 1100px)').matches) S.logOpen = false;
   if (!S.ready) return;
   renderNav(); renderMain(); renderLog();
+  if (chatInView()) { markChatSeen(); clearChatPops(); }
 });
 
 function boot() {

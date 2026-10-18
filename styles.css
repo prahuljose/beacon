@@ -1429,3 +1429,38 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
   .main { padding-left: calc(22px + var(--pills-pad, 0px)); }
 }
 @media (max-width: 900px) { body.has-pills .main { padding-bottom: 150px; } }
+
+/* v16: chat alerts. Unread badge on the Crew tab, and pop-up cards. */
+.nav a { position: relative; }
+.nav-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px;
+  border-radius: 9px; background: #e5484d; color: #fff; font-family: var(--slab); font-size: 11px; line-height: 1; vertical-align: 1px;
+  box-shadow: 0 0 0 2px var(--wall); }
+.nav-badge.priv { background: #8e6bd1; }
+.nav-badge.bump { animation: badge-bump .45s cubic-bezier(.3,1.6,.5,1); }
+@keyframes badge-bump { 0% { transform: scale(.4); } 60% { transform: scale(1.25); } 100% { transform: none; } }
+
+.cpops { position: fixed; right: calc(var(--log-w) + 18px); bottom: 18px; z-index: 950; display: flex; flex-direction: column-reverse; gap: 8px; width: min(340px, calc(100vw - 32px)); pointer-events: none; }
+.cpop { pointer-events: auto; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; cursor: pointer; text-align: left;
+  padding: 10px 10px 10px 12px; border-radius: 6px; border: 1px solid var(--line); border-left: 4px solid var(--accent);
+  background: linear-gradient(180deg, #2a3338, #20282c); box-shadow: 0 12px 28px rgba(0,0,0,.55); color: var(--paper);
+  animation: cpop-in .32s cubic-bezier(.2,1.2,.4,1) backwards; transition: opacity .25s, transform .25s; }
+.cpop:hover, .cpop:focus-visible { border-color: var(--accent); outline: none; }
+.cpop.out { opacity: 0; transform: translateX(24px); }
+.cpop .avatar.xs { width: 30px; height: 30px; font-size: 13px; border-radius: 50%; }
+.cpop-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cpop-head { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.cpop-head b { font-weight: 400; color: var(--accent); font-family: var(--slab); letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpop-time { margin-left: auto; color: var(--faint); font-size: 11px; }
+.cpop-priv { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: #c9b6f0; border: 1px solid rgba(180,138,214,.6); border-radius: 8px; padding: 0 6px; white-space: nowrap; }
+.cpop-priv svg { width: 10px; height: 10px; }
+.cpop-body { font-size: 13px; line-height: 1.35; color: #d9d2bf; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.cpop-x { border: 0; background: none; color: var(--faint); font-size: 16px; line-height: 1; padding: 0 2px; cursor: pointer; }
+.cpop-x:hover { color: var(--paper); }
+/* A private message looks like a folded note. */
+.cpop.priv { border-left-color: #8e6bd1; background: linear-gradient(180deg, #2e2a3a, #23202c); }
+.cpop.priv::after { content: ''; position: absolute; top: 0; right: 0; width: 16px; height: 16px; background: linear-gradient(225deg, var(--wall) 50%, #4a4166 50%); border-bottom-left-radius: 3px; }
+.cpop { position: relative; }
+.cpop.priv .cpop-x { margin-right: 10px; }
+@keyframes cpop-in { from { opacity: 0; transform: translateY(14px) scale(.96); } }
+@media (max-width: 1100px) { .cpops { right: 16px; bottom: 84px; } }
+@media (prefers-reduced-motion: reduce) { .cpop, .nav-badge.bump { animation: none; } }
