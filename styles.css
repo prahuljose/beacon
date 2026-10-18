@@ -1420,3 +1420,12 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
   .ns-plate { animation: none; }
   .desk-props .smoke path, .desk-props .ember, .desk-props .lamp-cone, .ct-status.online .ct-dot { animation: none; }
 }
+
+/* v15: minimised scenes stack in a column on the left (wide screens). */
+@media (min-width: 901px) {
+  .pill-bar { top: 76px; bottom: auto; left: 14px; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px;
+    max-width: 220px; max-height: calc(100vh - 92px); overflow-y: auto; overflow-x: hidden; padding: 2px; }
+  .pill-bar .scene-pill { justify-content: flex-start; max-width: 216px; }
+  .main { padding-left: calc(22px + var(--pills-pad, 0px)); }
+}
+@media (max-width: 900px) { body.has-pills .main { padding-bottom: 150px; } }

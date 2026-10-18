@@ -20,6 +20,10 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 19 (2026-10-18): minimised scenes column
+- [x] Minimised scene pills (and the Turn Order pill) were covering page content at the bottom-left. On screens wider than 900px they now stack in a column at the top-left under the top bar (equal widths, scrolls if very long). `fitPills()` pushes `.main` right (`--pills-pad`) only as far as needed to clear the column, re-measuring because centred content moves half as far as its padding; runs on renderPills, renderMain and resize. Phones keep the bottom row, and `.main` gets 150px of extra bottom room when any pill is showing so content can scroll above them.
+- Checked at 1100, 1440, 1920, 2400 and phone width, with fake minimised scenes (local only). Deployed `?v=20`.
+
 ## Round 18 (2026-10-18): hotfix
 - [x] GM Scenes page showed only a giant Vault grid over everything. Cause: the vault-door login animation (Round 15) used class names `.vault` and `.vault-frame`, which the Vault scene already uses, so the door's `position: fixed; inset: 0` overlay rules hijacked the scene. Renamed every door class to `vdoor` / `vd-*`. Checked the other new generic class names (tray, token, bar, exp…): each is only used by its own feature. Lesson: prefix new feature classes. Deployed `?v=19`.
 

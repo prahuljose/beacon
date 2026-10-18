@@ -1392,6 +1392,7 @@ function renderMain() {
   else if (r.view === 'scenes' && isGM()) { main.innerHTML = scenesHTML(); renderTurnsViews(); }
   else { main.innerHTML = crewHTML(); mountBoard(); renderChat(true); }
   S.deferRender = false;
+  fitPills();
 
   if (key) {
     const el = main.querySelector(`[data-bind="${CSS.escape(key)}"], [data-fk="${CSS.escape(key)}"]`);
@@ -3181,8 +3182,33 @@ function renderPills() {
   if (!bar) return;
   const live = S.live.filter(s => s.kind !== 'board' && S.wins[s.id] && S.wins[s.id].min);
   bar.innerHTML = live.map(sc => sc.kind === 'turns' ? turnsPillHTML(sc)
-    : `<button class="scene-pill" data-act="win-restore" data-id="${sc.id}"><span class="live-dot"></span><b>${esc(sc.title || 'Untitled')}</b></button>`).join('');
+    : `<button class="scene-pill" data-act="win-restore" data-id="${sc.id}" title="${esc(sc.title || 'Untitled')}: open"><span class="live-dot"></span><b>${esc(sc.title || 'Untitled')}</b></button>`).join('');
+  fitPills();
 }
+
+// Wide screens stack the minimised scenes in a column on the left. If the
+// page content would sit under that column, push it right just far enough.
+// Narrow screens keep them along the bottom with room to scroll past.
+function fitPills() {
+  const bar = $('#pill-bar'), main = $('#main');
+  if (!bar || !main) return;
+  const any = bar.children.length > 0;
+  document.body.classList.toggle('has-pills', any);
+  let pad = 0;
+  if (any && window.matchMedia('(min-width: 901px)').matches) {
+    // Centred content only moves half as far as the padding, so measure again until it clears.
+    const content = main.firstElementChild, edge = bar.getBoundingClientRect().right + 14;
+    const left = () => (content ? content.getBoundingClientRect().left : main.getBoundingClientRect().left + 22);
+    for (let i = 0; i < 6; i++) {
+      main.style.setProperty('--pills-pad', pad + 'px');
+      const overlap = Math.ceil(edge - left());
+      if (overlap <= 0) break;
+      pad += overlap;
+    }
+  }
+  main.style.setProperty('--pills-pad', pad + 'px');
+}
+window.addEventListener('resize', () => { clearTimeout(fitPills.t); fitPills.t = setTimeout(fitPills, 120); });
 
 function turnsPillHTML(sc) {
   const st = normTurns((turnsScene() || sc).state);
