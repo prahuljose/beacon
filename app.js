@@ -1080,16 +1080,16 @@ const DESK_SVG = `<svg class="desk-props" viewBox="0 0 230 110" aria-hidden="tru
 function vaultDoor(name) {
   if (reducedMotion()) return;
   const v = document.createElement('div');
-  v.className = 'vault';
+  v.className = 'vdoor';
   v.innerHTML = `
-    <div class="vault-frame">
-      <div class="vault-door">
-        ${Array.from({ length: 8 }, (_, i) => `<i class="bolt" style="--a:${i * 45 + 22.5}deg"></i>`).join('')}
-        <div class="vault-ring"></div>
-        <div class="vault-dial"><div class="vault-wheel"><i></i><i></i><i></i></div><b></b></div>
+    <div class="vd-frame">
+      <div class="vd-door">
+        ${Array.from({ length: 8 }, (_, i) => `<i class="vd-bolt" style="--a:${i * 45 + 22.5}deg"></i>`).join('')}
+        <div class="vd-ring"></div>
+        <div class="vd-dial"><div class="vd-wheel"><i></i><i></i><i></i></div><b></b></div>
       </div>
     </div>
-    <p class="vault-hello">Welcome back, <b>${esc(name)}</b></p>`;
+    <p class="vd-hello">Welcome back, <b>${esc(name)}</b></p>`;
   document.body.appendChild(v);
   const done = () => { v.classList.add('gone'); setTimeout(() => v.remove(), 500); };
   v.addEventListener('click', done);

@@ -20,6 +20,9 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 18 (2026-10-18): hotfix
+- [x] GM Scenes page showed only a giant Vault grid over everything. Cause: the vault-door login animation (Round 15) used class names `.vault` and `.vault-frame`, which the Vault scene already uses, so the door's `position: fixed; inset: 0` overlay rules hijacked the scene. Renamed every door class to `vdoor` / `vd-*`. Checked the other new generic class names (tray, token, bar, exp…): each is only used by its own feature. Lesson: prefix new feature classes. Deployed `?v=19`.
+
 ## Round 17 (2026-10-18): hanging neon sign
 - [x] Login "DEBT" is now design H: the Alfa Slab letters traced in amber neon (dark fill, amber tube, pale core, soft blurred halo at ~40% glow) on a riveted steel plate hanging from two chains that fade up into the dark; it sways ±0.6° over 9 s. Built as an inline SVG, one `<g class="ns-l">` per letter so a single letter can sputter (`.off` turns the tube to grey glass); about 1 time in 8 the whole sign drops out. Reduced motion: no sway, no flicker. Old `.neon` text-shadow sign removed.
 - Checked at desktop and phone widths. Deployed `?v=18`.
