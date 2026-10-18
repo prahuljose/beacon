@@ -1464,3 +1464,17 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 @keyframes cpop-in { from { opacity: 0; transform: translateY(14px) scale(.96); } }
 @media (max-width: 1100px) { .cpops { right: 16px; bottom: 84px; } }
 @media (prefers-reduced-motion: reduce) { .cpop, .nav-badge.bump { animation: none; } }
+
+/* v17: GM chat moderation and tidier pop-ups. */
+.chat-main { flex: 1; min-width: 0; }
+.chat-del { flex: none; align-self: flex-start; display: inline-flex; padding: 4px; border: 1px solid transparent; border-radius: 3px; background: none; color: var(--faint); cursor: pointer; opacity: 0; transition: opacity .12s; }
+.chat-msg:hover .chat-del, .chat-del:focus-visible { opacity: 1; }
+.chat-del:hover { color: #e07b6f; border-color: rgba(224,123,111,.5); }
+@media (hover: none) { .chat-del { opacity: .7; } }
+.cpop-count { font-size: 10.5px; color: #1b1f22; background: var(--accent); border-radius: 8px; padding: 0 6px; white-space: nowrap; font-family: var(--slab); }
+.cpop.priv .cpop-count { background: #b48ad6; }
+.cpop.bump { animation: cpop-bump .35s ease-out; }
+@keyframes cpop-bump { 0% { transform: translateX(-6px); } 60% { transform: translateX(2px); } 100% { transform: none; } }
+.cpop-more { pointer-events: auto; align-self: flex-end; border: 1px solid var(--line); background: rgba(32,40,44,.95); color: var(--dim); border-radius: 14px; padding: 4px 12px; font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 6px 16px rgba(0,0,0,.45); }
+.cpop-more:hover { color: var(--paper); border-color: var(--brass); }
+@media (prefers-reduced-motion: reduce) { .cpop.bump { animation: none; } }

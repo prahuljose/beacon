@@ -181,6 +181,7 @@ const trimTs = s => String(s || '').replace(/(\.\d{3})\d+/, '$1');
 const DIE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><circle cx="8.5" cy="8.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.4" fill="currentColor" stroke="none"/></svg>';
 const die = (px = 16) => DIE_SVG.replace('<svg', `<svg width="${px}" height="${px}"`);
 const REROLL_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>';
+const TRASH_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
 const EYE_OFF_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M17.9 17.9A10 10 0 0 1 12 20c-7 0-11-8-11-8a18 18 0 0 1 5.1-5.9"/><path d="M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.2 3.2"/><path d="M1 1l22 22"/></svg>';
 const WARN_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 1 21h22L12 2zm1 15h-2v2h2v-2zm0-7h-2v5h2v-5z"/></svg>';
 
@@ -287,6 +288,7 @@ const ERRORS = {
   not_found: 'That no longer exists. It may have been deleted.',
   empty: 'Type something first.',
   pick_player: 'Pick who the private message is for.',
+  slow_down: 'Slow down: up to 5 messages every 10 seconds (20 a minute).',
 };
 function fail(err) {
   if (err && err.code === '28P01') return signOut('You were signed out. Log in again.');
@@ -752,6 +754,12 @@ async function sync() {
     }
     const newChat = [];
     for (const m of r.chat) if (!S.chat.some(x => x.id === m.id)) { S.chat.push(m); newChat.push(m); chatChanged = true; }
+    if ((r.chat_deleted || []).length) {
+      const gone = new Set(r.chat_deleted);
+      const before = S.chat.length;
+      S.chat = S.chat.filter(m => !gone.has(m.id));
+      if (S.chat.length !== before) { chatChanged = true; dropChatPops(gone); }
+    }
     if (S.chat.length > 200) S.chat = S.chat.slice(-200);
 
     // Live scenes: new ones pop open for everyone.
@@ -787,7 +795,7 @@ async function sync() {
     if (rulesChanged && S.route.view === 'rules') refreshMain(new Set(), true);
     if (crewChanged) renderClock();
     if (rollsChanged || crewChanged || changed.size) renderLog();
-    if (chatChanged) { renderChat(); chatArrived(newChat); }
+    if (chatChanged) { renderChat(); chatArrived(newChat); renderChatAlerts(); refreshGmChatCount(); }
     if (liveChanged || vaultChanged || changed.size) renderScenes();
     else if (vaultChanged) renderVaultViews();
     for (const id of dirtyScenes) redrawScene(id);
@@ -1587,8 +1595,9 @@ function renderChat(force) {
     return `
       <div class="chat-msg ${m.private ? 'private' : ''}">
         ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
-        <div><b style="color:${esc(color)}">${esc(m.who)}</b> <span class="chat-time">${relTime(m.created_at)}</span> ${tag}
+        <div class="chat-main"><b style="color:${esc(color)}">${esc(m.who)}</b> <span class="chat-time">${relTime(m.created_at)}</span> ${tag}
           <div class="chat-body">${esc(m.body)}</div></div>
+        ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete message from ${esc(m.who)}">${TRASH_SVG}</button>` : ''}
       </div>`;
   }).join('') : '<p class="small dim" style="margin:auto">No messages yet.</p>';
   if (nearBottom) list.scrollTop = list.scrollHeight;
@@ -1619,7 +1628,14 @@ function markChatSeen() {
 function chatArrived(list) {
   if (!S.ready || !list.length) return;
   if (chatInView()) { markChatSeen(); return; }
-  list.filter(m => !chatFromMe(m) && m.id > chatSeen()).forEach(chatPop);
+  // Group a batch by sender first, so a burst becomes one card per person.
+  const groups = new Map();
+  for (const m of list) if (!chatFromMe(m) && m.id > chatSeen()) {
+    const k = popKey(m);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(m);
+  }
+  for (const msgs of groups.values()) chatPop(msgs);
   renderChatAlerts();
 }
 
@@ -1653,38 +1669,90 @@ function setTabAlert(n) {
   if (icon.getAttribute('href') !== want) icon.setAttribute('href', want);
 }
 
-// Pop-up card for one message, bottom right. Click opens the chat.
-function chatPop(m) {
+// Pop-up cards, bottom right. One card per sender (private kept separate):
+// more messages from the same person update that card with a count, at most
+// three cards show, and anything beyond that folds into a "+N more" pill. So
+// a burst of messages stays tidy. Click a card or the pill to open the chat.
+const POP_MAX = 3;
+let popOverflow = 0;
+const popKey = m => (m.sheet_id || 'gm') + (m.private ? ':p' : '');
+function popCards() { const host = $('#chat-pops'); return host ? [...host.querySelectorAll('.cpop:not(.out)')] : []; }
+function chatPop(msgs) {
+  msgs = Array.isArray(msgs) ? msgs : [msgs];
   const host = $('#chat-pops');
-  if (!host) return;
+  if (!host || !msgs.length) return;
+  const m = msgs[0], key = popKey(m);
+  let card = popCards().find(c => c.dataset.key === key);
+  if (card) {
+    card._ids.push(...msgs.map(x => x.id));
+    host.prepend(card);                    // newest sender goes to the bottom of the stack
+    fillPop(card, true);
+  } else if (popCards().length >= POP_MAX) {
+    // Cards already full: count it in the pill rather than knocking a card out.
+    popOverflow += msgs.length;
+    renderPopMore();
+    return;
+  } else {
+    card = document.createElement('div');
+    card.className = 'cpop' + (m.private ? ' priv' : '');
+    card.dataset.key = key;
+    card._ids = msgs.map(x => x.id);
+    card.setAttribute('role', 'button');
+    card.tabIndex = 0;
+    card.addEventListener('mouseenter', () => clearTimeout(card._t));
+    card.addEventListener('mouseleave', () => armPop(card, 3000));
+    card.addEventListener('click', e => { if (e.target.closest('.cpop-x')) closePop(card); else openChat(); });
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openChat(); } if (e.key === 'Escape') closePop(card); });
+    host.prepend(card);
+    fillPop(card, false);
+  }
+  armPop(card, 6500);
+  renderPopMore();
+}
+function fillPop(card, bump) {
+  const msgs = card._ids.map(id => S.chat.find(x => x.id === id)).filter(Boolean);
+  if (!msgs.length) { card.remove(); return; }
+  const m = msgs[msgs.length - 1], n = msgs.length;
   const rec = m.sheet_id && S.sheets.get(m.sheet_id);
-  const color = rec ? accentOf(rec) : GM_COLOR;
   const text = String(m.body || '').replace(/\s+/g, ' ').trim();
-  const card = document.createElement('div');
-  card.className = 'cpop' + (m.private ? ' priv' : '');
-  card.setAttribute('role', 'button');
-  card.tabIndex = 0;
-  card.style.setProperty('--accent', color);
+  card.style.setProperty('--accent', rec ? accentOf(rec) : GM_COLOR);
   card.innerHTML = `
     ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
     <span class="cpop-text">
-      <span class="cpop-head"><b>${esc(m.who || 'Someone')}</b>${m.private ? `<span class="cpop-priv">${EYE_OFF_SVG} Private</span>` : ''}<span class="cpop-time">now</span></span>
+      <span class="cpop-head"><b>${esc(m.who || 'Someone')}</b>${m.private ? `<span class="cpop-priv">${EYE_OFF_SVG} Private</span>` : ''}${n > 1 ? `<span class="cpop-count">${n} new</span>` : ''}<span class="cpop-time">now</span></span>
       <span class="cpop-body">${esc(text.length > 140 ? text.slice(0, 140) + '…' : text)}</span>
     </span>
     <button type="button" class="cpop-x" aria-label="Dismiss">×</button>`;
-  const close = () => { card.classList.add('out'); setTimeout(() => card.remove(), 250); };
-  let t = setTimeout(close, 6500);
-  card.addEventListener('mouseenter', () => clearTimeout(t));
-  card.addEventListener('mouseleave', () => { clearTimeout(t); t = setTimeout(close, 3000); });
-  card.addEventListener('click', e => {
-    if (e.target.closest('.cpop-x')) { close(); return; }
-    openChat();
-  });
-  card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openChat(); } if (e.key === 'Escape') close(); });
-  host.prepend(card);
-  while (host.children.length > 3) host.lastElementChild.remove();
+  card.setAttribute('aria-label', `${n > 1 ? n + ' new messages' : 'New message'} from ${m.who}: ${text.slice(0, 80)}`);
+  if (bump) { card.classList.remove('bump'); void card.offsetWidth; card.classList.add('bump'); }
 }
-function clearChatPops() { const host = $('#chat-pops'); if (host) host.innerHTML = ''; }
+function armPop(card, ms) { clearTimeout(card._t); card._t = setTimeout(() => closePop(card), ms); }
+function closePop(card) { clearTimeout(card._t); card.classList.add('out'); setTimeout(() => { card.remove(); renderPopMore(); }, 250); }
+function renderPopMore() {
+  const host = $('#chat-pops');
+  if (!host) return;
+  let pill = host.querySelector('.cpop-more');
+  if (!popOverflow) { if (pill) pill.remove(); return; }
+  if (!pill) {
+    pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'cpop-more';
+    pill.addEventListener('click', openChat);
+    host.appendChild(pill);                // last child = top of the stack
+  }
+  pill.textContent = `+${popOverflow} more message${popOverflow === 1 ? '' : 's'} in chat`;
+  clearTimeout(pill._t);
+  pill._t = setTimeout(() => { popOverflow = 0; renderPopMore(); }, 8000);
+}
+// Deleted by the GM: take those messages out of any card showing them.
+function dropChatPops(ids) {
+  for (const card of popCards()) {
+    card._ids = card._ids.filter(id => !ids.has(id));
+    fillPop(card, false);
+  }
+}
+function clearChatPops() { popOverflow = 0; const host = $('#chat-pops'); if (host) host.innerHTML = ''; }
+function refreshGmChatCount() { const el = $('#gm-chat-count'); if (el) el.textContent = `${S.chat.length} message${S.chat.length === 1 ? '' : 's'} now.`; }
 function openChat() {
   clearChatPops();
   const go = () => {
@@ -2266,6 +2334,9 @@ function gmHTML() {
           </form>
           <h2 style="margin-top:18px">Dice log</h2>
           <button class="btn danger" data-act="gm-clear">Clear for everyone</button>
+          <h2 style="margin-top:18px">Chat</h2>
+          <p class="small dim" style="margin:-4px 0 8px">Delete single messages with the bin icon in the chat. <span id="gm-chat-count">${S.chat.length} message${S.chat.length === 1 ? '' : 's'} now.</span></p>
+          <button class="btn danger" data-act="chat-clear">Erase all chat</button>
         </section>
         <section class="panel s12 stats-panel" id="dice-stats">${diceStatsHTML()}</section>
         <section class="panel s12">
@@ -3697,7 +3768,8 @@ document.addEventListener('submit', async e => {
   if (form.id === 'chat-form') {
     e.preventDefault();
     const body = S.chatDraft.trim();
-    if (!body) return;
+    if (!body || S.chatSending) return;
+    S.chatSending = true;
     try {
       const priv = isGM() ? !!S.chatTo : S.chatPrivate;
       const m = await api('chat_send', { p_body: body, p_private: priv, p_to: isGM() ? (S.chatTo || null) : null });
@@ -3705,6 +3777,7 @@ document.addEventListener('submit', async e => {
       if (!S.chat.some(x => x.id === m.id)) S.chat.push(m);
       renderChat(true); ping();
     } catch (err) { fail(err); }
+    finally { S.chatSending = false; }
     return;
   }
   const kind = form.dataset.actForm;
@@ -4081,6 +4154,28 @@ document.addEventListener('click', async e => {
     case 'stats-range': S.stats.range = el.dataset.v; rerenderStats(); break;
     case 'stats-sort': S.stats.sort = el.dataset.v; rerenderStats(); break;
     case 'stats-sel': S.stats.sel = el.dataset.v; rerenderStats(); break;
+
+    // GM chat moderation (soft delete: hidden for everyone, kept in the database)
+    case 'chat-del': {
+      const id = +el.dataset.id, m = S.chat.find(x => x.id === id);
+      if (!m || !confirm(`Delete this message from ${m.who} for everyone?\n\n“${m.body.slice(0, 120)}${m.body.length > 120 ? '…' : ''}”`)) break;
+      try {
+        await api('gm_chat_delete', { p_id: id });
+        S.chat = S.chat.filter(x => x.id !== id);
+        dropChatPops(new Set([id])); renderChat(); renderChatAlerts(); refreshGmChatCount(); ping();
+        toast('Message deleted.');
+      } catch (err) { fail(err); }
+      break;
+    }
+    case 'chat-clear': {
+      if (!confirm('Erase the whole chat for everyone?\n\nEvery message disappears for all players and for you. This can’t be undone from the portal.')) break;
+      try {
+        const n = await api('gm_chat_clear');
+        S.chat = []; clearChatPops(); renderChat(); renderChatAlerts(); refreshGmChatCount(); ping();
+        toast(`Chat erased (${n} message${n === 1 ? '' : 's'}).`);
+      } catch (err) { fail(err); }
+      break;
+    }
 
     // GM
     case 'gm-clear': {
