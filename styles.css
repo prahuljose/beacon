@@ -1478,3 +1478,61 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 .cpop-more { pointer-events: auto; align-self: flex-end; border: 1px solid var(--line); background: rgba(32,40,44,.95); color: var(--dim); border-radius: 14px; padding: 4px 12px; font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 6px 16px rgba(0,0,0,.45); }
 .cpop-more:hover { color: var(--paper); border-color: var(--brass); }
 @media (prefers-reduced-motion: reduce) { .cpop.bump { animation: none; } }
+
+/* v18: shared background music. */
+.music-wrap { position: relative; }
+.music-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 9px; border-radius: 15px; border: 1px solid var(--line); background: #1a2024; color: var(--paper); font: inherit; font-size: 12.5px; cursor: pointer; max-width: 200px; }
+.music-chip:hover, .music-chip[aria-expanded="true"] { border-color: var(--brass); }
+.music-chip.waiting { border-color: rgba(201,162,75,.7); box-shadow: 0 0 0 3px rgba(201,162,75,.12); }
+.mc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-label small { color: var(--faint); font-size: 10.5px; }
+.m-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
+.m-eq i { width: 3px; height: 4px; background: var(--brass); border-radius: 1px; }
+.music-chip:not(.live) .m-eq i { background: var(--faint); }
+.music-chip.live .m-eq i, .music-banner .m-eq i { animation: m-eq .9s ease-in-out infinite; }
+.m-eq i:nth-child(2) { animation-delay: .2s; } .m-eq i:nth-child(3) { animation-delay: .45s; } .m-eq i:nth-child(4) { animation-delay: .1s; }
+@keyframes m-eq { 0%, 100% { height: 3px; } 50% { height: 12px; } }
+.music-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 960; width: min(320px, calc(100vw - 24px)); padding: 12px; border-radius: 6px; border: 1px solid var(--line);
+  background: linear-gradient(180deg, #2a3338, #20282c); box-shadow: 0 14px 32px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 9px; max-height: calc(100vh - 90px); overflow-y: auto; }
+.music-pop[hidden] { display: none; }
+.mp-video { width: 100%; aspect-ratio: 16 / 9; border-radius: 4px; background: #000; border: 1px solid #000; display: flex; align-items: center; justify-content: center; text-align: center; padding: 10px; color: var(--faint); font-size: 11.5px; flex: none; }
+.mp-now { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mp-title { font-family: var(--slab); font-weight: 400; font-size: 16px; color: var(--paper); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-sub { font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-seek { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dim); }
+.mp-seek input, .mp-vol input { flex: 1; accent-color: var(--brass); width: auto; padding: 0; border: 0; background: none; }
+.mp-transport { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mp-transport .btn.brass { flex: 1; }
+.mp-label { font-size: 10.5px; color: var(--faint); letter-spacing: .14em; text-transform: uppercase; margin-top: 4px; }
+.mp-moods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.mp-mood { position: relative; display: flex; }
+.mp-mood > button:first-child { flex: 1; min-width: 0; text-align: left; padding: 7px 22px 7px 9px; border: 1px solid var(--line); border-radius: 4px; background: #1a2024; color: var(--paper); font: inherit; font-size: 12.5px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-mood > button:first-child small { display: block; color: var(--faint); font-size: 10px; }
+.mp-mood > button:first-child:hover { border-color: var(--brass); }
+.mp-mood.on > button:first-child { border-color: var(--brass); background: rgba(201,162,75,.13); }
+.mp-x { position: absolute; top: 3px; right: 3px; border: 0; background: none; color: var(--faint); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; }
+.mp-x:hover { color: #e07b6f; }
+.mp-add { display: flex; flex-direction: column; gap: 6px; }
+.mp-add input { font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 3px; }
+.mp-add-row { display: flex; gap: 6px; }
+.mp-listeners { display: flex; flex-wrap: wrap; gap: 5px; }
+.mp-ml { font-size: 11px; border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; color: var(--dim); }
+.mp-ml.ok { color: #b9dca6; border-color: rgba(127,176,105,.55); }
+.mp-ml.mut { color: #e8cf8f; border-color: rgba(224,164,88,.55); }
+.mp-ml.no, .mp-ml.none { border-style: dashed; color: var(--faint); }
+.mp-vol { display: flex; align-items: center; gap: 8px; }
+.mp-volv { min-width: 44px; text-align: right; font-size: 12px; color: var(--dim); }
+.mp-note { margin: 0; font-size: 11.5px; color: var(--faint); }
+.mp-join { width: 100%; }
+/* The player itself: invisible for players; for the GM it sits over the popover's video slot. */
+.music-host { position: fixed; left: 0; bottom: 0; width: 256px; height: 144px; opacity: 0; pointer-events: none; z-index: -1; overflow: hidden; }
+.music-host.shown { opacity: 1; pointer-events: auto; z-index: 970; border-radius: 4px; bottom: auto; }
+.music-host iframe { width: 100%; height: 100%; display: block; border: 0; }
+.music-banner { position: fixed; left: 50%; top: 62px; transform: translateX(-50%); z-index: 905; display: inline-flex; align-items: center; gap: 9px; max-width: calc(100vw - 32px);
+  padding: 7px 16px 7px 13px; border-radius: 20px; border: 1px solid var(--brass); background: #3a2e14; color: #f0d999; font: inherit; font-size: 13px; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+.music-banner b { font-weight: 400; font-family: var(--slab); letter-spacing: .02em; }
+.music-banner:hover { background: #46381a; }
+@media (max-width: 900px) { .music-banner { top: 96px; font-size: 12px; } .music-chip { max-width: 140px; } }
+@media (prefers-reduced-motion: reduce) { .music-chip.live .m-eq i, .music-banner .m-eq i { animation: none; height: 8px; } }
+/* Mid widths: the music chip shrinks to its icon so the tabs keep their room. */
+@media (min-width: 901px) and (max-width: 1360px) { .music-chip { padding: 0 9px; } .music-chip .mc-label { display: none; } }

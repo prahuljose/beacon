@@ -289,6 +289,7 @@ const ERRORS = {
   empty: 'Type something first.',
   pick_player: 'Pick who the private message is for.',
   slow_down: 'Slow down: up to 5 messages every 10 seconds (20 a minute).',
+  bad_music: 'That music setting couldn’t be saved.',
 };
 function fail(err) {
   if (err && err.code === '28P01') return signOut('You were signed out. Log in again.');
@@ -359,6 +360,7 @@ function connectRealtime() {
       sync().then(() => { S.drafts.delete(p.did); redrawScene(p.scene); });
     });
     channel.on('broadcast', { event: 'loc' }, ({ payload: p }) => showLocPing(p));
+    channel.on('broadcast', { event: 'music' }, ({ payload: p }) => { if (p && p.state) applyMusic(p, false); });
     channel.on('broadcast', { event: 'tokmove' }, ({ payload: p }) => {
       const st = p && (S.strokes.get(p.scene) || new Map()).get(p.id);
       if (!st || !Array.isArray(p.points) || p.points.length !== 2) return;
@@ -366,7 +368,7 @@ function connectRealtime() {
       redrawScene(p.scene);
     });
     const ch = channel;   // callbacks from a replaced channel are ignored
-    channel.on('presence', { event: 'sync' }, () => { if (ch !== channel) return; S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); renderLoginStatus(); });
+    channel.on('presence', { event: 'sync' }, () => { if (ch !== channel) return; S.presence = channel.presenceState(); S.rtLive = true; renderOnline(); renderLoginStatus(); if (M.open && isGM()) { const l = $('.mp-listeners'); if (l) l.innerHTML = listenersHTML(); } });
     channel.subscribe(status => {
       if (ch !== channel) return;
       S.rtLive = status === 'SUBSCRIBED';
@@ -406,7 +408,7 @@ setInterval(() => {
 const TAB_ID = Math.random().toString(36).slice(2, 12);
 function trackPresence() {
   if (!channel || !S.rtLive || !S.me) return;
-  try { channel.track({ role: S.me.role, sheet_id: S.me.sheet_id || null, away: document.hidden }); } catch { /* not joined yet */ }
+  try { channel.track({ role: S.me.role, sheet_id: S.me.sheet_id || null, away: document.hidden, music: musicPresence() }); } catch { /* not joined yet */ }
 }
 // The login page has to track something to be sent presence at all. A viewer
 // has no role or character, so presenceMap() skips it and no one sees it.
@@ -1236,7 +1238,7 @@ async function signOut(msg) {
   S.sheets.clear(); S.rolls.clear(); S.vault.clear(); S.vaultLoaded = false;
   S.live = []; S.liveKnown = null; S.scenes = null; S.scenesSig = null;
   S.strokes.clear(); S.strokesLoaded.clear(); S.chat = [];
-  clearChatPops(); setTabAlert(0);
+  clearChatPops(); setTabAlert(0); stopMusic();
   S.gmNotes = null; S.deleted = null; S.customize = false;
   canvases.clear(); winEls.clear();
   if (tok && !msg) { try { await rpc('logout', { p_token: tok }); } catch { /* already gone */ } }
@@ -1253,6 +1255,7 @@ function renderApp() {
       <a class="brand" href="#/crew">DEBT</a>
       <div class="clock-wrap" id="clock"></div>
       <nav class="nav" id="nav"></nav>
+      <div class="music-wrap" id="music"></div>
       <div class="online-wrap" id="online"></div>
       <div class="me" id="me"></div>
     </header>
@@ -1269,6 +1272,7 @@ function renderApp() {
     <input type="file" id="file-scene" accept="image/*" hidden>`;
   renderNav();
   renderClock();
+  renderMusic();
   renderOnline();
   renderMain();
   renderLog();
@@ -1765,6 +1769,456 @@ function openChat() {
   else { location.hash = '#/crew'; setTimeout(go, 80); }
 }
 window.addEventListener('storage', e => { if (S.me && e.key === chatSeenKey()) renderChatAlerts(); });
+
+
+// ── Shared background music ────────────────────────────────────────────────
+// The GM picks a YouTube video or playlist ("moods") and controls playback.
+// Every client runs a YouTube player: the GM sees theirs in the jukebox,
+// players' players are invisible and only their volume is theirs to change.
+// The state lives in its own table (music_get / gm_music_set), one row per
+// room so local tests ('dev') never reach the real crew ('live'). The server
+// stamps `at` when `pos` was true; clients work out where the track should
+// be now and correct drift. Browsers need one click before sound can play.
+
+const MUSIC_ROOM = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? 'dev' : 'live';
+const M = {
+  state: {}, ver: '', moods: [], skew: 0,
+  player: null, ready: false, apiState: 0, curKey: '',
+  unlocked: false, open: false,
+  vol: (() => { const v = parseInt(lsGet('debt.musicVol'), 10); return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 60; })(),
+  muted: lsGet('debt.musicMute') === '1',
+  draftName: '', draftUrl: '', lastFix: 0, timers: [],
+};
+const hasSource = st => !!(st && (st.vid || st.list));
+const musicOn = () => hasSource(M.state) && !!M.state.playing;
+
+// Parse a YouTube link: watch?v=, youtu.be/, shorts/, embed/, music.youtube.com, playlist?list=.
+function parseYouTube(url) {
+  const u = String(url || '').trim();
+  if (!u) return null;
+  let vid = null, list = null;
+  try {
+    const x = new URL(/^https?:\/\//i.test(u) ? u : 'https://' + u);
+    if (!/(^|\.)youtube\.com$|(^|\.)youtu\.be$|(^|\.)youtube-nocookie\.com$/i.test(x.hostname)) return null;
+    list = x.searchParams.get('list');
+    vid = x.searchParams.get('v');
+    if (!vid && /youtu\.be$/i.test(x.hostname)) vid = x.pathname.split('/')[1];
+    const m = x.pathname.match(/\/(?:shorts|embed|live|v)\/([A-Za-z0-9_-]{11})/);
+    if (!vid && m) vid = m[1];
+  } catch { return null; }
+  if (vid && !/^[A-Za-z0-9_-]{11}$/.test(vid)) vid = null;
+  if (list && !/^[A-Za-z0-9_-]{10,64}$/.test(list)) list = null;
+  // A "radio mix" list depends on the viewer, so treat it as a single video.
+  if (list && /^RD/.test(list) && vid) list = null;
+  return vid || list ? { vid, list } : null;
+}
+
+function musicPresence() { return { on: M.unlocked && musicOn() && !M.muted && M.vol > 0, vol: M.muted ? 0 : M.vol }; }
+let musicTrackT = null;
+function musicPresenceChanged() { clearTimeout(musicTrackT); musicTrackT = setTimeout(trackPresence, 800); }
+
+async function fetchMusic() {
+  if (!S.token || !S.me) return;
+  try {
+    const t0 = Date.now(), r = await api('music_get', { p_room: MUSIC_ROOM });
+    M.skew = Date.parse(trimTs(r.server_now)) - Math.round((t0 + Date.now()) / 2);
+    applyMusic(r, true);
+  } catch { /* next poll */ }
+}
+function applyMusic(r, fromFetch) {
+  if (!r || !r.updated_at) return;
+  if (r.moods) M.moods = r.moods;
+  const ver = trimTs(r.updated_at);
+  if (M.ver && Date.parse(ver) < Date.parse(M.ver)) { if (fromFetch && r.moods) renderMusic(); return; }
+  const changed = ver !== M.ver;
+  M.ver = ver;
+  M.state = r.state || {};
+  if (changed || fromFetch) { renderMusic(); syncPlayer(); musicPresenceChanged(); }
+}
+
+// Where the track should be right now, in seconds.
+function musicTarget(st = M.state) {
+  let t = +st.pos || 0;
+  if (st.playing && st.at) t += Math.max(0, (Date.now() + M.skew - Date.parse(trimTs(st.at))) / 1000);
+  return t;
+}
+
+// ── The YouTube player ──
+let ytApi = null;
+function loadYouTubeApi() {
+  if (ytApi) return ytApi;
+  ytApi = new Promise(resolve => {
+    if (window.YT && window.YT.Player) return resolve(window.YT);
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (prev) try { prev(); } catch { /* ignore */ } resolve(window.YT); };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.onerror = () => { ytApi = null; resolve(null); };
+    document.head.appendChild(tag);
+  });
+  return ytApi;
+}
+function musicHost() {
+  let h = document.getElementById('music-host');
+  if (!h) {
+    h = document.createElement('div');
+    h.id = 'music-host';
+    h.className = 'music-host';
+    h.innerHTML = '<div id="music-player"></div>';
+    document.body.appendChild(h);
+  }
+  return h;
+}
+async function ensurePlayer() {
+  if (M.player || M.creating) return;
+  M.creating = true;
+  const YT = await loadYouTubeApi();
+  if (!YT || !S.me) { M.creating = false; return; }
+  musicHost();
+  M.player = new YT.Player('music-player', {
+    width: 256, height: 144,
+    playerVars: { autoplay: 0, controls: isGM() ? 1 : 0, disablekb: isGM() ? 0 : 1, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, fs: isGM() ? 1 : 0 },
+    events: {
+      onReady: () => { M.ready = true; M.creating = false; applyVolume(); syncPlayer(true); },
+      onStateChange: e => { M.apiState = e.data; onPlayerState(e.data); },
+      onError: e => onPlayerError(e.data),
+    },
+  });
+}
+function stopMusic() {
+  M.timers.forEach(clearInterval); M.timers = [];
+  try { if (M.player && M.player.destroy) M.player.destroy(); } catch { /* ignore */ }
+  M.player = null; M.ready = false; M.creating = false; M.curKey = ''; M.state = {}; M.ver = ''; M.moods = []; M.open = false;
+  const h = document.getElementById('music-host'); if (h) h.remove();
+  renderMusicBanner();
+}
+// Pause gently: ramp the volume down over ~0.8 s, then pause and restore it.
+function fadeOutThen(done) {
+  if (M.fading) return;
+  M.fading = true;
+  const start = M.muted ? 0 : M.vol, steps = 8;
+  let i = 0;
+  const iv = setInterval(() => {
+    i++;
+    try { M.player.setVolume(Math.round(start * (1 - i / steps))); } catch { /* ignore */ }
+    if (i >= steps) { clearInterval(iv); done(); M.fading = false; applyVolume(); }
+  }, 100);
+}
+function applyVolume() {
+  if (!M.ready) return;
+  try { M.player.setVolume(M.vol); if (M.muted || M.vol === 0) M.player.mute(); else M.player.unMute(); } catch { /* not ready */ }
+}
+
+// Bring the local player in line with the shared state.
+function syncPlayer(force) {
+  renderMusicBanner();
+  const st = M.state;
+  if (!hasSource(st)) { if (M.ready) try { M.player.stopVideo(); } catch { /* ignore */ } M.curKey = ''; return; }
+  if (!M.unlocked) return;                  // waiting for the first click on the page
+  if (!M.player) { ensurePlayer(); return; }
+  if (!M.ready) return;
+  const p = M.player, key = `${st.vid || ''}|${st.list || ''}|${st.list ? (st.index || 0) : ''}`;
+  const start = Math.max(0, musicTarget(st));
+  try {
+    if (key !== M.curKey || force) {
+      M.curKey = key;
+      if (st.list) {
+        const args = { listType: 'playlist', list: st.list, index: st.index || 0, startSeconds: start };
+        st.playing ? p.loadPlaylist(args) : p.cuePlaylist(args);
+        setTimeout(() => { try { p.setLoop(true); } catch { /* ignore */ } }, 800);
+      } else {
+        const args = { videoId: st.vid, startSeconds: start };
+        st.playing ? p.loadVideoById(args) : p.cueVideoById(args);
+      }
+      return;
+    }
+    const ps = p.getPlayerState();
+    if (st.playing && ps !== 1 && ps !== 3) { p.seekTo(start, true); p.playVideo(); }
+    if (!st.playing && ps === 1) fadeOutThen(() => { try { if (!M.state.playing) p.pauseVideo(); } catch { /* ignore */ } });
+    if (!st.playing && Math.abs((p.getCurrentTime() || 0) - start) > 2) p.seekTo(start, true);
+  } catch { /* player busy */ }
+}
+
+// Every few seconds: players follow the GM; the GM's player is the reference.
+function musicTick() {
+  if (!M.ready || !hasSource(M.state) || !M.unlocked) return;
+  const st = M.state, p = M.player;
+  let cur, ps, idx;
+  try { cur = p.getCurrentTime() || 0; ps = p.getPlayerState(); idx = st.list ? p.getPlaylistIndex() : null; } catch { return; }
+  if (isGM()) {
+    if (!st.playing || ps !== 1) return;
+    const patch = {};
+    if (st.list && idx >= 0 && idx !== (st.index || 0)) { patch.index = idx; patch.pos = cur; }
+    else if (Math.abs(cur - musicTarget(st)) > 3 && Date.now() - M.lastFix > 8000) patch.pos = cur;
+    let title = '';
+    try { title = (p.getVideoData() || {}).title || ''; } catch { /* ignore */ }
+    if (title && title !== st.title) patch.title = title.slice(0, 120);
+    if (Object.keys(patch).length) { M.lastFix = Date.now(); gmMusic(patch); }
+    return;
+  }
+  if (!st.playing) return;
+  if (st.list && idx >= 0 && idx !== (st.index || 0)) { try { p.playVideoAt(st.index || 0); } catch { /* ignore */ } return; }
+  if (ps === 1) {
+    let tgt = musicTarget(st);
+    let dur = 0; try { dur = p.getDuration() || 0; } catch { /* ignore */ }
+    if (dur > 0 && tgt > dur) { if (st.list) return; tgt = st.loop === false ? dur : tgt % dur; }
+    if (Math.abs(cur - tgt) > 3) try { p.seekTo(tgt, true); } catch { /* ignore */ }
+  } else if (ps !== 3) syncPlayer();
+}
+function onPlayerState(code) {
+  // A single video that ends starts again (loop), playlists loop themselves.
+  if (code === 0 && !M.state.list && M.state.loop !== false && M.state.playing) { try { M.player.seekTo(0, true); M.player.playVideo(); } catch { /* ignore */ } }
+  if (isGM() && code === 0 && !M.state.list && M.state.loop === false && M.state.playing) gmMusic({ playing: false, pos: 0 });
+  if (M.open) renderMusicPop();
+}
+function onPlayerError(code) {
+  if (!isGM()) return;
+  const msg = code === 101 || code === 150 ? 'That video’s owner doesn’t allow playing it on other sites. Pick another.'
+    : code === 100 ? 'That video is private or was removed.' : 'YouTube couldn’t play that link.';
+  toast(msg, true);
+  if (M.state.list) setTimeout(() => { try { M.player.nextVideo(); } catch { /* ignore */ } }, 1500);
+}
+
+// ── GM: change the shared state ──
+async function gmMusic(patch, moods) {
+  if (!isGM()) return;
+  const next = patch ? { ...M.state, ...patch } : null;
+  if (next) delete next.at;
+  try {
+    const t0 = Date.now(), r = await api('gm_music_set', { p_room: MUSIC_ROOM, p_state: next, p_moods: moods || null });
+    M.skew = Date.parse(trimTs(r.server_now)) - Math.round((t0 + Date.now()) / 2);
+    applyMusic(r, true);
+    send('music', { state: r.state, updated_at: r.updated_at });
+  } catch (err) { fail(err); }
+}
+function gmCurrentPos() { try { return M.ready ? (M.player.getCurrentTime() || 0) : musicTarget(); } catch { return musicTarget(); } }
+function playSource(src, name) {
+  M.unlocked = true;
+  gmMusic({ mood: name || '', title: '', vid: src.vid || null, list: src.list || null, index: 0, pos: 0, playing: true, loop: true });
+}
+
+// ── UI: top-bar chip, popover, "tap to listen" banner ──
+function fmtTime(t) { t = Math.max(0, Math.floor(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
+function renderMusic() {
+  const host = $('#music');
+  if (!host) return;
+  const st = M.state, src = hasSource(st), gm = isGM();
+  if (!gm && !src) { host.innerHTML = ''; return; }
+  const label = !src ? 'Music' : (st.mood || st.title || 'Music');
+  const live = src && st.playing && M.unlocked && !M.muted && M.vol > 0;
+  host.innerHTML = `
+    <button class="music-chip ${live ? 'live' : ''} ${src && st.playing && !M.unlocked ? 'waiting' : ''}" data-mact="toggle" aria-expanded="${M.open}" title="${gm ? 'Music: you control it for everyone' : 'Music from the GM'}">
+      <span class="m-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span class="mc-label">${esc(label)}${src && !st.playing ? ' <small>paused</small>' : ''}</span>
+    </button>
+    <div class="music-pop" id="music-pop" ${M.open ? '' : 'hidden'}></div>`;
+  if (M.open) renderMusicPop();
+}
+function listenersHTML() {
+  const pm = S.presence || {}, rows = [];
+  const seen = new Set();
+  for (const metas of Object.values(pm)) for (const p of metas || []) {
+    if (p.role !== 'player' || !p.sheet_id) continue;
+    const rec = S.sheets.get(p.sheet_id);
+    if (!rec) continue;
+    const m = p.music || {}, prev = rows.find(r => r.id === p.sheet_id);
+    const st = m.on ? 'ok' : (m.vol === 0 ? 'mut' : 'no');
+    if (prev) { if (st === 'ok') { prev.st = 'ok'; prev.vol = m.vol; } continue; }
+    seen.add(p.sheet_id);
+    rows.push({ id: p.sheet_id, name: rec.data.name || 'Unnamed', st, vol: m.vol });
+  }
+  if (!rows.length) return '<span class="mp-ml none">No players online</span>';
+  return rows.map(r => `<span class="mp-ml ${r.st}">${esc(r.name)} · ${r.st === 'ok' ? r.vol + '%' : r.st === 'mut' ? 'muted' : 'not listening'}</span>`).join('');
+}
+function renderMusicPop() {
+  const pop = $('#music-pop');
+  if (!pop) return;
+  const st = M.state, src = hasSource(st), gm = isGM();
+  const nowLine = src ? `<b class="mp-title">${esc(st.mood || 'Music')}</b><span class="mp-sub">${esc(st.title || (st.list ? 'YouTube playlist' : 'YouTube'))}${st.playing ? '' : ' · paused'}</span>`
+    : '<b class="mp-title">Nothing playing</b><span class="mp-sub">Pick a mood below</span>';
+  const vol = `
+    <div class="mp-vol">
+      <button type="button" class="icon-btn" data-mact="mute" aria-label="${M.muted ? 'Unmute' : 'Mute'}" title="${M.muted ? 'Unmute' : 'Mute'}">${M.muted || M.vol === 0 ? SOUND_OFF_SVG : SOUND_ON_SVG}</button>
+      <input type="range" min="0" max="100" step="1" value="${M.vol}" data-mvol aria-label="Your music volume">
+      <span class="mp-volv">${M.muted ? 'muted' : M.vol + '%'}</span>
+    </div>`;
+  if (!gm) {
+    pop.innerHTML = `
+      <div class="mp-now">${nowLine}</div>
+      ${src && st.playing && !M.unlocked ? '<button type="button" class="btn brass mp-join" data-mact="join">♪ Start listening</button>' : ''}
+      ${vol}
+      <p class="mp-note">Your volume only. The GM picks the music.</p>`;
+    return;
+  }
+  let dur = 0, cur = 0;
+  try { if (M.ready) { dur = M.player.getDuration() || 0; cur = M.player.getCurrentTime() || 0; } } catch { /* ignore */ }
+  pop.innerHTML = `
+    <div class="mp-video" id="music-slot">${src && M.unlocked ? '' : `<span>${src ? 'Click play to load the video' : 'Your video shows here (only you see it)'}</span>`}</div>
+    <div class="mp-now">${nowLine}</div>
+    ${src ? `
+    <div class="mp-seek"><span data-mcur>${fmtTime(cur)}</span><input type="range" min="0" max="${Math.max(1, Math.floor(dur))}" step="1" value="${Math.floor(cur)}" data-mseek aria-label="Seek for everyone"><span>${dur ? fmtTime(dur) : '–:––'}</span></div>
+    <div class="mp-transport">
+      ${st.list ? '<button type="button" class="btn sm" data-mact="prev" title="Previous track">⏮</button>' : ''}
+      <button type="button" class="btn brass" data-mact="play">${st.playing ? '⏸ Pause for all' : '▶ Play for all'}</button>
+      ${st.list ? '<button type="button" class="btn sm" data-mact="next" title="Next track">⏭</button>' : ''}
+      <button type="button" class="btn sm ${st.loop !== false ? 'on' : ''}" data-mact="loop" title="Loop">↻ Loop</button>
+      <button type="button" class="btn sm ghost" data-mact="silence" title="Fade out and stop for everyone">Silence</button>
+    </div>` : ''}
+    <div class="mp-label">Moods</div>
+    <div class="mp-moods">${M.moods.length ? M.moods.map(m => `
+      <span class="mp-mood ${src && st.mood === m.name ? 'on' : ''}">
+        <button type="button" data-mact="mood" data-id="${esc(m.id)}" title="${esc(m.url)}">${esc(m.name)}<small>${m.list ? 'playlist' : 'video'}</small></button>
+        <button type="button" class="mp-x" data-mact="mood-del" data-id="${esc(m.id)}" aria-label="Remove ${esc(m.name)}">×</button>
+      </span>`).join('') : '<span class="mp-note">No moods yet. Paste a YouTube link below and save it as a mood.</span>'}</div>
+    <div class="mp-add">
+      <input type="text" data-mdraft="name" maxlength="30" placeholder="Mood name (e.g. Smoky Bar)" value="${esc(M.draftName)}" aria-label="Mood name">
+      <input type="text" data-mdraft="url" maxlength="300" placeholder="YouTube video or playlist link" value="${esc(M.draftUrl)}" aria-label="YouTube link">
+      <div class="mp-add-row"><button type="button" class="btn sm" data-mact="mood-save">+ Save mood</button><button type="button" class="btn sm ghost" data-mact="play-link">Play link now</button></div>
+    </div>
+    <div class="mp-label">Who's listening</div>
+    <div class="mp-listeners">${listenersHTML()}</div>
+    <div class="mp-label">Your volume</div>
+    ${vol}`;
+  placeGmVideo();
+}
+// The GM's video sits over the slot in the popover. It is never moved in the
+// DOM (that would reload it); the fixed host is positioned over the slot.
+function placeGmVideo() {
+  const h = document.getElementById('music-host');
+  if (!h) return;
+  const slot = isGM() && M.open ? document.getElementById('music-slot') : null;
+  const pop = slot && slot.closest('.music-pop');
+  const r = slot && slot.getBoundingClientRect(), pr = pop && pop.getBoundingClientRect();
+  // Only while the slot is fully inside the (scrollable) popover.
+  if (slot && hasSource(M.state) && M.unlocked && r.top >= pr.top - 1 && r.bottom <= pr.bottom + 1) {
+    Object.assign(h.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    h.classList.add('shown');
+  } else h.classList.remove('shown');
+}
+function renderMusicBanner() {
+  let b = document.getElementById('music-banner');
+  const need = S.me && musicOn() && !M.unlocked;
+  if (!need) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'music-banner';
+    b.className = 'music-banner';
+    b.dataset.mact = 'join';
+    document.body.appendChild(b);
+  }
+  b.innerHTML = `<span class="m-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span> The GM is playing music · <b>Tap to listen</b>`;
+}
+function unlockMusic() {
+  if (M.unlocked || !S.me) return;
+  M.unlocked = true;
+  renderMusicBanner(); renderMusic(); syncPlayer(); musicPresenceChanged();
+}
+function startMusic() {
+  M.timers.forEach(clearInterval);
+  M.timers = [
+    setInterval(() => { if (S.ready && !document.hidden) fetchMusic(); }, 10000),
+    setInterval(musicTick, 4000),
+    setInterval(() => {
+      if (!M.open || !isGM() || !M.ready) return;
+      const seek = document.querySelector('[data-mseek]');
+      if (seek && document.activeElement !== seek) {
+        try { const cur = M.player.getCurrentTime() || 0, dur = M.player.getDuration() || 0; seek.max = Math.max(1, Math.floor(dur)); seek.value = Math.floor(cur); const c = document.querySelector('[data-mcur]'); if (c) c.textContent = fmtTime(cur); } catch { /* ignore */ }
+      }
+      placeGmVideo();
+    }, 1000),
+  ];
+  setTimeout(fetchMusic, 600);
+}
+
+// Browsers allow sound only after the user has interacted with the page.
+document.addEventListener('pointerdown', () => { if (S.me && !M.unlocked) unlockMusic(); }, true);
+document.addEventListener('keydown', () => { if (S.me && !M.unlocked) unlockMusic(); }, true);
+window.addEventListener('resize', placeGmVideo);
+window.addEventListener('scroll', placeGmVideo, true);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ready) fetchMusic(); });
+
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.matches && t.matches('[data-mvol]')) {
+    M.vol = +t.value; M.muted = M.vol === 0 ? M.muted : false;
+    lsSet('debt.musicVol', String(M.vol)); lsSet('debt.musicMute', M.muted ? '1' : '0');
+    applyVolume();
+    const v = t.parentElement.querySelector('.mp-volv'); if (v) v.textContent = M.muted ? 'muted' : M.vol + '%';
+    musicPresenceChanged();
+  } else if (t.matches && t.matches('[data-mdraft]')) {
+    if (t.dataset.mdraft === 'name') M.draftName = t.value; else M.draftUrl = t.value;
+  }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.matches && t.matches('[data-mvol]')) renderMusic();
+  if (t.matches && t.matches('[data-mseek]') && isGM()) { const pos = +t.value; try { M.player.seekTo(pos, true); } catch { /* ignore */ } gmMusic({ pos }); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && M.open) { M.open = false; renderMusic(); placeGmVideo(); }
+  if (e.key === 'Enter' && e.target.matches && e.target.matches('[data-mdraft]')) { e.preventDefault(); document.querySelector('[data-mact="mood-save"]')?.click(); }
+});
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-mact]');
+  if (!el) {
+    if (M.open && !e.target.closest('.music-wrap') && !e.target.closest('#music-host')) { M.open = false; renderMusic(); placeGmVideo(); }
+    return;
+  }
+  const act = el.dataset.mact, st = M.state;
+  switch (act) {
+    case 'toggle': M.open = !M.open; renderMusic(); placeGmVideo(); break;
+    case 'join': unlockMusic(); break;
+    case 'mute':
+      if (M.vol === 0) { M.vol = 60; M.muted = false; } else M.muted = !M.muted;
+      lsSet('debt.musicVol', String(M.vol)); lsSet('debt.musicMute', M.muted ? '1' : '0');
+      applyVolume(); renderMusic(); musicPresenceChanged();
+      break;
+    case 'play':
+      if (!isGM()) break;
+      M.unlocked = true;
+      if (st.playing) gmMusic({ playing: false, pos: gmCurrentPos() });
+      else gmMusic({ playing: true, pos: gmCurrentPos() });
+      break;
+    case 'next': case 'prev': {
+      if (!isGM() || !st.list) break;
+      let n = 0; try { n = (M.player.getPlaylist() || []).length; } catch { /* ignore */ }
+      let idx = (st.index || 0) + (act === 'next' ? 1 : -1);
+      if (n) idx = (idx + n) % n; else idx = Math.max(0, idx);
+      gmMusic({ index: idx, pos: 0, playing: true, title: '' });
+      break;
+    }
+    case 'loop': if (isGM()) gmMusic({ loop: st.loop === false }); break;
+    case 'silence':
+      if (!isGM()) break;
+      gmMusic({ playing: false, pos: gmCurrentPos() });
+      break;
+    case 'mood': {
+      const m = M.moods.find(x => x.id === el.dataset.id);
+      if (m && isGM()) playSource(m, m.name);
+      break;
+    }
+    case 'mood-del': {
+      const m = M.moods.find(x => x.id === el.dataset.id);
+      if (!m || !isGM() || !confirm(`Remove the mood “${m.name}”?`)) break;
+      gmMusic(null, M.moods.filter(x => x.id !== m.id));
+      break;
+    }
+    case 'mood-save': case 'play-link': {
+      if (!isGM()) break;
+      const src = parseYouTube(M.draftUrl);
+      if (!src) { toast('Paste a YouTube video or playlist link.', true); break; }
+      const url = M.draftUrl.trim();
+      if (act === 'play-link') { playSource(src, M.draftName.trim() || ''); break; }
+      const name = M.draftName.trim() || (src.list ? 'Playlist' : 'Video') + ' ' + (M.moods.length + 1);
+      const mood = { id: uid(), name: name.slice(0, 30), url: url.slice(0, 300), vid: src.vid || null, list: src.list || null };
+      M.draftName = ''; M.draftUrl = '';
+      await gmMusic(null, [...M.moods, mood].slice(0, 60));
+      toast(`Saved “${mood.name}”.`);
+      break;
+    }
+  }
+});
 
 // ── Rendering: character sheet ─────────────────────────────────────────────
 
@@ -4284,6 +4738,7 @@ function boot() {
   connectRealtime();
   sync();
   startPolling();
+  startMusic();
   setInterval(() => { if (S.ready && !document.hidden) { renderLogTimes(); if (S.route.view === 'crew') renderChat(); } }, 30000);
 }
 function renderLogTimes() {
