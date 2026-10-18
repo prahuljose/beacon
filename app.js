@@ -3186,7 +3186,7 @@ function renderPills() {
   fitPills();
 }
 
-// Wide screens stack the minimised scenes in a column on the left. If the
+// Wide screens stack the minimised scenes in a column at the bottom-left. If the
 // page content would sit under that column, push it right just far enough.
 // Narrow screens keep them along the bottom with room to scroll past.
 function fitPills() {
