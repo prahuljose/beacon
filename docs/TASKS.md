@@ -20,6 +20,10 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 25 (2026-10-21): music volume curve
+- [x] The music slider now follows loudness, not YouTube's linear volume: slider 1–100 maps geometrically onto YouTube 1–40 (`musicLevel`, `MUSIC_MAX = 40`): 10 → 1, 20 → 2, 30 → 3, 40 → 4, 50 → 6, 70 → 13, 100 → 40. Default 30. Saved settings move to `debt.musicVol2`, converted so they sound the same (old 2 → 20, old 3 → 30; anything above 40 → 100).
+- [x] Bug found while testing: `applyVolume` called `setVolume()` then `unMute()`, and YouTube's unMute lifts anything under 5 back to 5, so every level below 5% played at 5%. Now it unmutes first (only if muted) and sets the level after. Checked against the real player: every slider step gives the expected YouTube volume, mute and unmute work. Deployed `?v=27`.
+
 ## Round 24 (2026-10-21)
 - [x] Who's-here list: a long name (e.g. Wally Wallbanger) truncated together with the "you" tag, which showed as dots. The name now truncates on its own (`.ol-n`) and the tag always shows in full. Checked with a long throwaway name. Deployed `?v=26`.
 

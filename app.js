@@ -1810,12 +1810,28 @@ window.addEventListener('storage', e => { if (S.me && e.key === chatSeenKey()) r
 // stamps `at` when `pos` was true; clients work out where the track should
 // be now and correct drift. Browsers need one click before sound can play.
 
+// The slider is a loudness curve, not YouTube's linear volume: hearing is
+// logarithmic, so a straight 0–100 put every comfortable level in the bottom
+// few percent. Slider 1–100 maps geometrically onto YouTube 1–MUSIC_MAX
+// (background music never needs more; the device volume goes higher).
+// Roughly: 20 → 2, 30 → 3, 40 → 4, 50 → 6, 70 → 13, 100 → 40.
+const MUSIC_MAX = 40;
+const musicLevel = s => (s <= 0 ? 0 : Math.max(1, Math.round(Math.pow(MUSIC_MAX, (Math.min(100, s) - 1) / 99))));
+function loadMusicVol() {
+  const v2 = parseInt(lsGet('debt.musicVol2'), 10);
+  if (Number.isFinite(v2)) return Math.max(0, Math.min(100, v2));
+  // Carry over the old linear setting so it sounds the same as before.
+  const old = parseInt(lsGet('debt.musicVol'), 10);
+  const s = !Number.isFinite(old) ? 30 : old <= 0 ? 0 : Math.round(1 + 99 * Math.log(Math.min(old, MUSIC_MAX)) / Math.log(MUSIC_MAX));
+  lsSet('debt.musicVol2', String(s));
+  return s;
+}
 const MUSIC_ROOM = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? 'dev' : 'live';
 const M = {
   state: {}, ver: '', moods: [], skew: 0,
   player: null, ready: false, apiState: 0, curKey: '',
   unlocked: false, open: false,
-  vol: (() => { const v = parseInt(lsGet('debt.musicVol'), 10); return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 60; })(),
+  vol: loadMusicVol(),
   muted: lsGet('debt.musicMute') === '1',
   draftName: '', draftUrl: '', lastFix: 0, timers: [],
 };
@@ -1926,7 +1942,7 @@ function stopMusic() {
 function fadeOutThen(done) {
   if (M.fading) return;
   M.fading = true;
-  const start = M.muted ? 0 : M.vol, steps = 8;
+  const start = M.muted ? 0 : musicLevel(M.vol), steps = 8;
   let i = 0;
   const iv = setInterval(() => {
     i++;
@@ -1936,7 +1952,12 @@ function fadeOutThen(done) {
 }
 function applyVolume() {
   if (!M.ready) return;
-  try { M.player.setVolume(M.vol); if (M.muted || M.vol === 0) M.player.mute(); else M.player.unMute(); } catch { /* not ready */ }
+  // Unmute first, then set the level: YouTube's unMute() lifts anything under 5 back up to 5.
+  try {
+    if (M.muted || M.vol === 0) { M.player.mute(); return; }
+    if (M.player.isMuted()) M.player.unMute();
+    M.player.setVolume(musicLevel(M.vol));
+  } catch { /* not ready */ }
 }
 
 // Bring the local player in line with the shared state.
@@ -2172,7 +2193,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.matches && t.matches('[data-mvol]')) {
     M.vol = +t.value; M.muted = M.vol === 0 ? M.muted : false;
-    lsSet('debt.musicVol', String(M.vol)); lsSet('debt.musicMute', M.muted ? '1' : '0');
+    lsSet('debt.musicVol2', String(M.vol)); lsSet('debt.musicMute', M.muted ? '1' : '0');
     applyVolume();
     const v = t.parentElement.querySelector('.mp-volv'); if (v) v.textContent = M.muted ? 'muted' : M.vol + '%';
     musicPresenceChanged();
@@ -2200,8 +2221,8 @@ document.addEventListener('click', async e => {
     case 'toggle': M.open = !M.open; renderMusic(); placeGmVideo(); break;
     case 'join': unlockMusic(); break;
     case 'mute':
-      if (M.vol === 0) { M.vol = 60; M.muted = false; } else M.muted = !M.muted;
-      lsSet('debt.musicVol', String(M.vol)); lsSet('debt.musicMute', M.muted ? '1' : '0');
+      if (M.vol === 0) { M.vol = 30; M.muted = false; } else M.muted = !M.muted;
+      lsSet('debt.musicVol2', String(M.vol)); lsSet('debt.musicMute', M.muted ? '1' : '0');
       applyVolume(); renderMusic(); musicPresenceChanged();
       break;
     case 'play':
