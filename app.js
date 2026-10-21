@@ -1111,12 +1111,16 @@ const DESK_SVG = `<svg class="desk-props" viewBox="0 0 230 110" aria-hidden="tru
 </svg>`;
 
 // Right password: the vault door spins its dial, pulls its bolts and swings open
-// while the portal loads behind it. Click to skip.
+// while the portal loads behind it. The page shows through the round doorway first,
+// then we zoom through it. Click to skip.
 function vaultDoor(name) {
   if (reducedMotion()) return;
+  // Line the wall's glow up with the login screen it replaces (that page can be taller than the window).
+  const login = document.querySelector('.login'), lr = login && login.getBoundingClientRect();
   const v = document.createElement('div');
   v.className = 'vdoor';
   v.innerHTML = `
+    <div class="vd-wall"><div class="vd-glow"${lr ? ` style="top:${Math.round(lr.top)}px;height:${Math.round(lr.height)}px"` : ''}></div></div>
     <div class="vd-frame">
       <div class="vd-door">
         ${Array.from({ length: 8 }, (_, i) => `<i class="vd-bolt" style="--a:${i * 45 + 22.5}deg"></i>`).join('')}
@@ -1126,11 +1130,12 @@ function vaultDoor(name) {
     </div>
     <p class="vd-hello">Welcome back, <b>${esc(name)}</b></p>`;
   document.body.appendChild(v);
-  const done = () => { v.classList.add('gone'); setTimeout(() => v.remove(), 500); };
+  const done = () => { v.classList.add('gone'); setTimeout(() => v.remove(), 350); };
   v.addEventListener('click', done);
   requestAnimationFrame(() => v.classList.add('go'));
   setTimeout(() => v.classList.add('open'), 1500);
-  setTimeout(done, 2500);
+  setTimeout(() => v.classList.add('zoom'), 2400);
+  setTimeout(() => v.remove(), 3450);
 }
 
 async function renderLogin(msg) {

@@ -1378,14 +1378,25 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 @keyframes dial-spin { 0% { transform: rotate(0); } 50% { transform: rotate(250deg); } 100% { transform: rotate(130deg); } }
 @keyframes dial-clunk { 0% { transform: rotate(40deg); } 30% { transform: rotate(-25deg); } 55% { transform: rotate(12deg); } 80% { transform: rotate(-5deg); } 100% { transform: none; } }
 
-/* Vault door on a good password. */
-.vdoor { position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
-  background: radial-gradient(ellipse at 50% 45%, #2a3338 0%, #12171a 60%, #0a0d0f 100%); perspective: 1400px; cursor: pointer; transition: background .5s, opacity .5s; }
-.vdoor.open { background: radial-gradient(ellipse at 50% 45%, rgba(42,51,56,.0), rgba(10,13,15,.0)); }
-.vdoor.gone { opacity: 0; pointer-events: none; }
-.vd-frame { --d: min(64vmin, 440px); width: calc(var(--d) + 28px); height: calc(var(--d) + 28px); border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(circle, #050708 60%, #1c2226 61%, #2f393f 70%, #161b1e 72%); box-shadow: 0 0 0 3px #3a464d, 0 30px 60px rgba(0,0,0,.6); transition: opacity .4s .6s; }
-.vdoor.open .vd-frame { opacity: 0; }
+/* Vault door on a good password. The wall has a round hole exactly behind the door, so
+   once the door swings open the page shows through it; then we push through the hole
+   (the whole vault scales up past the screen edges). */
+.vdoor { --d: min(64vmin, 440px); position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
+  perspective: 1400px; cursor: pointer; transition: transform 1s cubic-bezier(.6,0,.3,1), opacity .25s .75s; }
+/* The wall is the login screen's own background (body stripes + .login glow and hairline frame),
+   so the door appears on the same backdrop. Keep these in step with body and .login. */
+.vd-wall { position: absolute; inset: 0; overflow: hidden;
+  background: repeating-linear-gradient(90deg, rgba(255,255,255,.015) 0 2px, transparent 2px 6px), radial-gradient(ellipse at 50% 0%, #222c31 0%, var(--wall) 70%);
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent calc(var(--d) / 2 - 1px), #000 calc(var(--d) / 2));
+          mask: radial-gradient(circle at 50% 50%, transparent calc(var(--d) / 2 - 1px), #000 calc(var(--d) / 2)); }
+.vd-glow { position: absolute; left: 0; right: 0; top: 0; height: 100%;
+  background: radial-gradient(ellipse 70% 45% at 50% -5%, rgba(201,162,75,.16), transparent 70%), radial-gradient(ellipse 120% 80% at 50% 120%, rgba(0,0,0,.55), transparent 60%); }
+.vd-glow::before { content: ""; position: absolute; inset: 18px; border: 1px solid rgba(201,162,75,.12); border-radius: 10px; }
+.vdoor.zoom { transform: scale(4.5); opacity: 0; pointer-events: none; }
+.vdoor.gone { opacity: 0; pointer-events: none; transition: opacity .3s; }
+.vd-frame { position: relative; width: calc(var(--d) + 28px); height: calc(var(--d) + 28px); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle closest-side, transparent calc(100% - 14px), #1c2226 calc(100% - 13px), #2f393f calc(100% - 6px), #161b1e calc(100% - 2px));
+  box-shadow: 0 0 0 3px #3a464d, 0 30px 60px rgba(0,0,0,.6); }
 .vd-door { position: relative; width: var(--d); height: var(--d); border-radius: 50%; transform-origin: 0% 50%; transition: transform .9s cubic-bezier(.5,0,.3,1);
   background: radial-gradient(circle at 38% 32%, #56636a 0%, #3a464d 38%, #262f34 70%, #1a2023 100%);
   box-shadow: inset 0 0 0 10px #2b3338, inset 0 0 0 13px #c9a24b55, inset 0 0 0 26px #222a2e, inset 0 -18px 40px rgba(0,0,0,.45), 0 0 0 2px #0b0e10; }
@@ -1407,7 +1418,7 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 .vd-dial::before { content: ''; position: absolute; inset: 0; border-radius: 50%; transition: transform 1s cubic-bezier(.4,0,.2,1);
   background: repeating-conic-gradient(from 0deg, transparent 0 9deg, rgba(255,255,255,.06) 9deg 10deg); }
 .vdoor.go .vd-dial::before { transform: rotate(320deg); }
-.vd-hello { margin: 0; font-size: 15px; color: var(--dim); letter-spacing: .08em; opacity: 0; animation: tile-in .5s .3s forwards; transition: opacity .3s .5s; }
+.vd-hello { position: absolute; left: 16px; right: 16px; top: calc(50% + var(--d) / 2 + 34px); text-align: center; margin: 0; font-size: 15px; color: var(--dim); letter-spacing: .08em; opacity: 0; animation: tile-in .5s .3s forwards; transition: opacity .3s .5s; }
 .vd-hello b { color: var(--brass); font-family: var(--slab); font-weight: 400; letter-spacing: .04em; }
 .vdoor.open .vd-hello { opacity: 1; animation: hello-out .35s forwards; }
 @keyframes hello-out { to { opacity: 0; transform: translateY(-6px); } }

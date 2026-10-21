@@ -20,6 +20,10 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 29 (2026-10-21): vault door reveal
+- [x] Login vault door: the overlay is now a wall with a round hole exactly behind the door (`.vd-wall`, CSS mask). When the door swings open the portal shows only through the doorway, then the whole vault scales up (`.vdoor.zoom`, scale 4.5, 1 s) until the page is fully revealed. Timeline: dial/bolts 0–1.5 s, door opens 1.5 s, zoom 2.4 s, removed 3.45 s. Click still skips; reduced motion still skips entirely.
+- [x] The wall uses the login screen's own background (body stripes + `.login` glow and hairline frame, via `.vd-glow` lined up with the login page's box), so the backdrop doesn't change when the door appears. Checked with headless Chrome against the real login page: background pixels match within 1/255. Welcome text is positioned under the door so the hole stays centred. Deployed `?v=31`.
+
 ## Round 28 (2026-10-21)
 - [x] Crew cards: the Vice/Virtue chips stretched to the height of the "+1 Grit" button with their text stuck at the top. `.chips` now centres its items and `.chip` centres its text (3/9 px padding, line-height 1.2). Measured: text centred in the chip, chips level with the button. Deployed `?v=30`.
 
