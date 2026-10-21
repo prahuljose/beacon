@@ -20,6 +20,9 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 24 (2026-10-21)
+- [x] Who's-here list: a long name (e.g. Wally Wallbanger) truncated together with the "you" tag, which showed as dots. The name now truncates on its own (`.ol-n`) and the tag always shows in full. Checked with a long throwaway name. Deployed `?v=26`.
+
 ## Round 23 (2026-10-21): the Shop
 - [x] Backup first: schema `backup_20261021` (sheets, rolls, chat, crew, gm_notes, gm_sessions, scenes, strokes, vault_boxes, music, roll_archive). Row counts verified.
 - [x] supabase/v10.sql: `public.shop` (one row per room 'live' / 'dev'; `catalog` jsonb, `open`, `sold` counts kept apart so catalogue edits never reset them) and `public.shop_orders` (snapshot of items, total, status pending/approved/declined/cancelled/refunded, gift). `chat.kind` ('msg' | 'shop'). RPCs: `shop_get` (players get only open categories, visible items, revealed effects, units left; never GM notes; their own orders without stats), `gm_shop_save`, `shop_order` (players only; prices from the catalogue; checks open/visible/stock/money minus pending; max 5 pending), `shop_cancel`, `gm_shop_decide` (approve runs `private.shop_apply`: money off, items → Gear (items, weapons with dice/stat/effect) or Kit (armor with reduction/durability), sold counts, chat line "X bought …" in the live room only), `gm_shop_refund` (money back, removes that order's items by `oid`, restocks), `gm_shop_give` (free or priced gift, "got … from the GM"). Lock order shop → sheet everywhere.

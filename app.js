@@ -458,7 +458,7 @@ function renderOnline() {
     return `
       <div class="ol-row ${st}">
         ${x.rec ? avatarHTML(x.rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
-        <span class="ol-name">${esc(x.name)}${(x.id === 'gm' && isGM()) || x.id === mine() ? ' <small class="you">you</small>' : ''}</span>
+        <span class="ol-name"><span class="ol-n">${esc(x.name)}</span>${(x.id === 'gm' && isGM()) || x.id === mine() ? '<small class="you">you</small>' : ''}</span>
         <span class="ol-status"><i class="ol-dot"></i>${STATUS_LABEL[st]}</span>
       </div>`;
   }).join('');

@@ -1628,3 +1628,7 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
   .sh-order, .sh-req { grid-template-columns: 1fr auto; } .sh-order .sh-when, .sh-req .sh-items { grid-column: 1 / -1; }
   .sh-search { width: 100% !important; }
 }
+/* Online list: a long name shortens, the "you" tag stays whole. */
+.ol-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ol-name .ol-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ol-name .you { flex: none; }
