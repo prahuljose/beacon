@@ -211,8 +211,8 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--brass); }
 .hpbar { height: 6px; border-radius: 3px; background: var(--wall); overflow: hidden; margin-top: 4px; }
 .hpbar i { display: block; height: 100%; background: var(--green); }
 .hpbar.low i { background: var(--red); }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--dim); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }   /* don't stretch the chips to the +1 Grit button */
+.chip { display: inline-flex; align-items: center; font-size: 12px; line-height: 1.2; padding: 3px 9px; border-radius: 10px; border: 1px solid var(--line); color: var(--dim); }
 .chip.vice { color: #d9a59d; border-color: rgba(217,165,157,.35); }
 .chip.virtue { color: #c8d7b8; border-color: rgba(200,215,184,.35); }
 .new-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 200px; border: 2px dashed var(--line); border-radius: 3px; color: var(--dim); background: transparent; }

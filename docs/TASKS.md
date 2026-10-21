@@ -20,6 +20,9 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 28 (2026-10-21)
+- [x] Crew cards: the Vice/Virtue chips stretched to the height of the "+1 Grit" button with their text stuck at the top. `.chips` now centres its items and `.chip` centres its text (3/9 px padding, line-height 1.2). Measured: text centred in the chip, chips level with the button. Deployed `?v=30`.
+
 ## Round 27 (2026-10-21): page rail with live scenes
 - [x] Crew, Rules and Shop (plus Scenes and GM for the GM) moved out of the top bar into a left icon rail (`.rail`, `renderRail`): three heads, open book, shopping bag, folded map, key. Badges on the rail: unread chat on Crew, pending shop requests on Shop (GM), live count on Scenes (GM). The top bar keeps only the character links. Phones (≤900 px): the rail becomes a bottom bar.
 - [x] Minimised-scene pills (bottom-left) replaced by a "Live" section in the rail: one tile per live scene (`renderLive`). Turn Order tile shows round, current avatar and first name (bumps on a new turn); picture scenes show a map icon, the Vault a safe icon. Tiles of open windows are highlighted. Click: open a minimised scene, bring a buried window to the front, or minimise the one on top. Phones: a "Live" tab with a count opens a list (Esc / tap outside closes). New scene windows open right of the rail.
