@@ -49,7 +49,7 @@ polling as a backup.
 - Static `index.html` + `styles.css` + `app.js`. No build step. Vercel serves
   the repo as-is on every push to `main`.
 - Data lives in the Supabase project **beacon** (RJ org, ap-south-1).
-  The schema is `supabase/schema.sql` (v2), then `supabase/v3.sql`, `v4.sql`, `v5.sql`, `v6.sql`, `v7.sql` (tokens, dice stats) `v8.sql` (chat moderation, rate limit) and `v9.sql` (shared music) on top.
+  The schema is `supabase/schema.sql` (v2), then `supabase/v3.sql`, `v4.sql`, `v5.sql`, `v6.sql`, `v7.sql` (tokens, dice stats) `v8.sql` (chat moderation, rate limit) `v9.sql` (shared music) and `v10.sql` (the Shop) on top.
 - The browser only holds the public Supabase key and a session token. Tables
   are closed to that key. Every call goes through a database function that
   checks the session and the role first.

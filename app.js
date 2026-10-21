@@ -240,6 +240,7 @@ const S = {
   npcName: '',
   stats: { rows: null, loading: false, range: 'all', sel: null, sort: 'rolls', at: 0 },
   sound: lsGet('debt.sound') !== '0',
+  seenOids: new Map(),   // sheet id -> shop items already seen (see sheetRecord)
   net: 'ok',             // connection banner: 'ok' | 'down' | 'back'
 };
 const pending = new Map(); // `${id}|${path}` -> { id, path, value, timer }
@@ -290,6 +291,15 @@ const ERRORS = {
   pick_player: 'Pick who the private message is for.',
   slow_down: 'Slow down: up to 5 messages every 10 seconds (20 a minute).',
   bad_music: 'That music setting couldn’t be saved.',
+  shop_closed: 'The shop is closed right now.',
+  bad_order: 'Something is wrong with that order. Refresh and try again.',
+  not_for_sale: 'One of those items isn’t for sale any more. Refresh the shop.',
+  out_of_stock: 'Sold out: there aren’t enough of that item left.',
+  not_enough_money: 'Not enough money for that (requests waiting for the GM count too).',
+  too_many_orders: 'You already have 5 requests waiting for the GM.',
+  already_decided: 'That order was already dealt with.',
+  players_only: 'Only players can buy. Use “Give an item” instead.',
+  bad_shop: 'The shop couldn’t be saved. Refresh and try again.',
 };
 function fail(err) {
   if (err && err.code === '28P01') return signOut('You were signed out. Log in again.');
@@ -361,6 +371,7 @@ function connectRealtime() {
     });
     channel.on('broadcast', { event: 'loc' }, ({ payload: p }) => showLocPing(p));
     channel.on('broadcast', { event: 'music' }, ({ payload: p }) => { if (p && p.state) applyMusic(p, false); });
+    channel.on('broadcast', { event: 'shop' }, () => shopPinged());
     channel.on('broadcast', { event: 'tokmove' }, ({ payload: p }) => {
       const st = p && (S.strokes.get(p.scene) || new Map()).get(p.id);
       if (!st || !Array.isArray(p.points) || p.points.length !== 2) return;
@@ -686,8 +697,19 @@ document.addEventListener('pointerdown', () => {
 
 function sheetRecord(rec) {
   const data = normalize(rec.data);
-  // Keep what the user typed but hasn't been saved yet.
-  for (const p of pending.values()) if (p.id === rec.id) setPath(data, p.path, clone(p.value));
+  // Items the shop has added (they carry an order id) that this browser hasn't seen yet.
+  const seen = S.seenOids.get(rec.id) || new Set(), fresh = { gear: [], kit: [] };
+  for (const k of ['gear', 'kit']) for (const x of data[k]) if (x && x.oid != null && !seen.has(k + x.oid + '|' + x.name)) { fresh[k].push(x); seen.add(k + x.oid + '|' + x.name); }
+  S.seenOids.set(rec.id, seen);
+  // Keep what the user typed but hasn't been saved yet. If that is a whole
+  // Gear or Kit list, add the newly bought items to it so the save can't drop them.
+  for (const p of pending.values()) if (p.id === rec.id) {
+    if ((p.path === 'gear' || p.path === 'kit') && Array.isArray(p.value) && fresh[p.path].length) {
+      const have = new Set(p.value.map(x => x && x.oid != null ? x.oid + '|' + x.name : null));
+      for (const x of fresh[p.path]) if (!have.has(x.oid + '|' + x.name)) p.value.push(clone(x));
+    }
+    setPath(data, p.path, clone(p.value));
+  }
   return { id: rec.id, data, sort: rec.sort, has_pass: rec.has_pass, updated_at: rec.updated_at, _json: JSON.stringify(data) };
 }
 
@@ -791,7 +813,7 @@ async function sync() {
 
     if (isGM() && r.scenes_sig !== S.scenesSig) { S.scenesSig = r.scenes_sig; loadScenes(); }
 
-    if (!S.ready) { initChatSeen(); S.ready = true; renderApp(); trackPresence(); return; }
+    if (!S.ready) { initChatSeen(); S.ready = true; renderApp(); trackPresence(); fetchShop(); return; }
     if (changed.size) { renderNav(); renderOnline(); refreshTokPickers(); }
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);
     if (rulesChanged && S.route.view === 'rules') refreshMain(new Set(), true);
@@ -1238,7 +1260,7 @@ async function signOut(msg) {
   S.sheets.clear(); S.rolls.clear(); S.vault.clear(); S.vaultLoaded = false;
   S.live = []; S.liveKnown = null; S.scenes = null; S.scenesSig = null;
   S.strokes.clear(); S.strokesLoaded.clear(); S.chat = [];
-  clearChatPops(); setTabAlert(0); stopMusic();
+  clearChatPops(); setTabAlert(0); stopMusic(); stopShop();
   S.gmNotes = null; S.deleted = null; S.customize = false;
   canvases.clear(); winEls.clear();
   if (tok && !msg) { try { await rpc('logout', { p_token: tok }); } catch { /* already gone */ } }
@@ -1374,6 +1396,7 @@ function renderNav() {
   nav.innerHTML = [
     `<a href="#/crew" class="${r.view === 'crew' ? 'on' : ''}">Crew</a>`,
     `<a href="#/rules" class="${r.view === 'rules' ? 'on' : ''}">Rules</a>`,
+    ...(isGM() || shopOpen() ? [`<a href="#/shop" class="${r.view === 'shop' ? 'on' : ''}">Shop${isGM() && pendingCount() ? ` <span class="sh-navbadge" title="${pendingCount()} request${pendingCount() === 1 ? '' : 's'} waiting">${pendingCount()}</span>` : ''}</a>`] : []),
     ...sheets.map(rec =>
       `<a href="#/c/${rec.id}" class="${r.view === 'sheet' && r.id === rec.id ? 'on' : ''} ${rec.id === mine() ? 'mine' : ''}">
          <span class="sw" style="background:${esc(accentOf(rec))}"></span>${esc(rec.data.name || 'Unnamed')}${rec.id === mine() ? ' <small class="you">you</small>' : ''}</a>`),
@@ -1406,6 +1429,7 @@ function renderMain() {
   else if (r.view === 'rules') main.innerHTML = rulesHTML();
   else if (r.view === 'gm' && isGM()) { main.innerHTML = gmHTML(); if (S.gmNotes === null) loadGM(); if (!S.stats.rows && !S.stats.loading) loadStats(); }
   else if (r.view === 'scenes' && isGM()) { main.innerHTML = scenesHTML(); renderTurnsViews(); }
+  else if (r.view === 'shop') main.innerHTML = shopHTML();
   else { main.innerHTML = crewHTML(); mountBoard(); renderChat(true); }
   S.deferRender = false;
   fitPills();
@@ -1596,6 +1620,12 @@ function renderChat(force) {
       tag = `<span class="tag private">${EYE_OFF_SVG} ${tag}</span>`;
       if (isGM() && m.sheet_id && !fromMe) tag += ` <button class="btn sm ghost chat-reply" data-act="chat-reply" data-id="${m.sheet_id}">Reply privately</button>`;
     }
+    if (m.kind === 'shop') return `
+      <div class="chat-msg shop-line">
+        ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
+        <div class="chat-main"><span class="sh-bag" aria-hidden="true">🛒</span> <b style="color:${esc(color)}">${esc(m.who)}</b> ${esc(m.body)} <span class="chat-time">${relTime(m.created_at)}</span></div>
+        ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete shop message">${TRASH_SVG}</button>` : ''}
+      </div>`;
     return `
       <div class="chat-msg ${m.private ? 'private' : ''}">
         ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
@@ -2219,6 +2249,402 @@ document.addEventListener('click', async e => {
     }
   }
 });
+
+// ── The Shop ───────────────────────────────────────────────────────────────
+// The GM keeps a catalogue and opens or closes the shop. Players fill a cart
+// and request a purchase; the GM approves (money comes off the sheet, items
+// land in Gear / Kit, the chat says who bought what) or declines. No selling.
+// All checks happen on the server (shop_order / gm_shop_decide): prices come
+// from the catalogue, players never receive GM notes or hidden items. One
+// shop per room, so local tests ('dev') never touch the real one ('live').
+
+const SHOP_ROOM = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? 'dev' : 'live';
+const SHOP_TYPES = [['item', 'Item'], ['weapon', 'Weapon'], ['armor', 'Armor'], ['apparel', 'Apparel']];
+const SHOP_STATUS = { pending: 'Waiting for the GM', approved: 'Approved', declined: 'Declined', cancelled: 'Cancelled', refunded: 'Refunded' };
+const SH = {
+  data: null,               // { open, catalog, sold, orders }
+  dirty: false, saveT: null, saving: false,
+  tab: 'requests', full: false, preview: false,
+  filter: 'All', query: '',
+  give: { sheet: '', item: '', qty: 1, price: 0 },
+  seenOrders: null,         // order id -> status, to notice changes
+  busy: new Set(),
+};
+const shopOpen = () => !!(SH.data && SH.data.open);
+const cartKey = () => 'debt.cart.' + (mine() || 'none');
+function getCart() { const c = lsJSON(cartKey(), []); return Array.isArray(c) ? c.filter(x => x && x.id && x.qty > 0) : []; }
+function setCart(c) { lsSet(cartKey(), c.length ? JSON.stringify(c) : null); }
+const shopInt = (v, d = 0) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; };
+
+async function fetchShop() {
+  if (!S.token || !S.me) return;
+  try { applyShop(await api('shop_get', { p_room: SHOP_ROOM })); } catch { /* next poll */ }
+}
+function applyShop(r) {
+  if (!r) return;
+  const prev = SH.data;
+  const next = { open: !!r.open, catalog: r.catalog || [], sold: r.sold || {}, orders: r.orders || [] };
+  // The GM's unsaved edits win over what the server last had.
+  if (isGM() && prev && (SH.dirty || SH.saving)) next.catalog = prev.catalog;
+  SH.data = next;
+  noticeOrders(next.orders);
+  // Drop cart lines for items that are gone.
+  if (!isGM()) {
+    const ids = new Set(shopItems(next.catalog).map(x => x.it.id));
+    const cart = getCart(), kept = cart.filter(x => ids.has(x.id));
+    if (kept.length !== cart.length) setCart(kept);
+  }
+  renderNav();
+  if (S.route.view === 'shop') renderShopSafe();
+}
+// Toasts when something happens to an order: the GM hears about new requests,
+// players hear when theirs is decided.
+function noticeOrders(orders) {
+  const seen = SH.seenOrders, now = new Map(orders.map(o => [o.id, o.status]));
+  SH.seenOrders = now;
+  if (!seen) return;
+  for (const o of orders) {
+    const was = seen.get(o.id);
+    if (isGM() && o.status === 'pending' && !was) toast(`New shop request from ${o.who}: ${money(o.total)}`);
+    if (!isGM() && was === 'pending' && o.status !== 'pending' && o.status !== 'cancelled') {
+      const names = (o.items || []).map(x => x.name + (x.qty > 1 ? ' ×' + x.qty : '')).join(', ');
+      toast(o.status === 'approved' ? `The GM approved your order: ${names}.` : `The GM declined your order: ${names}.`, o.status !== 'approved');
+    }
+  }
+}
+function shopItems(cat) {
+  const out = [];
+  (cat || []).forEach((c, ci) => (c.items || []).forEach((it, ii) => out.push({ c, ci, it, ii })));
+  return out;
+}
+function findShopItem(id) { return shopItems(SH.data && SH.data.catalog).find(x => x.it.id === id); }
+const pendingTotal = () => (SH.data ? SH.data.orders.filter(o => o.status === 'pending' && (isGM() || o.sheet_id === mine())).reduce((a, o) => a + o.total, 0) : 0);
+const pendingCount = () => (SH.data ? SH.data.orders.filter(o => o.status === 'pending').length : 0);
+function myMoney() { const r = S.sheets.get(mine()); const v = r && r.data.money ? Number(r.data.money.left) : 0; return Number.isFinite(v) ? v : 0; }
+
+// Re-rendering the editor while someone types would lose the caret.
+function renderShopSafe() {
+  const root = $('#shop-root');
+  if (root && root.contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { SH.renderLater = true; return; }
+  if (root) { const y = window.scrollY; root.outerHTML = shopHTML(); window.scrollTo(0, y); }
+}
+document.addEventListener('focusout', () => { if (SH.renderLater && S.route.view === 'shop') { SH.renderLater = false; setTimeout(renderShopSafe, 0); } });
+
+function startShop() {
+  fetchShop();
+  clearInterval(SH.poll);
+  SH.poll = setInterval(() => { if (S.ready && !document.hidden) fetchShop(); }, 12000);
+}
+function stopShop() { clearInterval(SH.poll); SH.data = null; SH.seenOrders = null; SH.dirty = false; }
+let shopPingT = null;
+function shopPinged() { clearTimeout(shopPingT); shopPingT = setTimeout(fetchShop, 250); }
+
+// ── Rendering ──
+function shopHTML() {
+  if (!SH.data) return '<div class="wrap" id="shop-root"><h1 class="page-title">Shop</h1><p class="dim">Opening the shop…</p></div>';
+  return `<div class="wrap shop-page" id="shop-root">${isGM() ? shopGmHTML() : shopPlayerHTML()}</div>`;
+}
+const shopTypeTag = t => (t === 'weapon' ? '<span class="sh-type">Weapon</span>' : t === 'armor' ? '<span class="sh-type">Armor</span>' : t === 'apparel' ? '<span class="sh-type">Apparel</span>' : '');
+
+function shopPlayerHTML(preview) {
+  const d = SH.data;
+  if (!preview && !d.open) return `<h1 class="page-title">The Shop</h1><div class="panel sh-closed"><h2>The shop is closed</h2><p class="dim">The GM hasn’t opened it. Check back later.</p></div>${myOrdersHTML()}`;
+  // In preview the GM sees exactly what players see: open categories, visible items, revealed effects.
+  const cats = preview
+    ? d.catalog.filter(c => !c.hidden).map(c => ({ ...c, items: (c.items || []).filter(i => !i.hidden).map(i => ({ ...i, effect: i.shown ? i.effect : null, left: i.stock == null ? null : Math.max(0, shopInt(i.stock) - shopInt(d.sold[i.id])) })) }))
+    : d.catalog;
+  const cart = preview ? [] : getCart();
+  const priceOf = id => { const f = cats.flatMap(c => c.items || []).find(i => i.id === id); return f ? shopInt(f.price) : 0; };
+  const cartTotal = cart.reduce((a, x) => a + priceOf(x.id) * x.qty, 0);
+  const have = myMoney(), held = pendingTotal(), spare = have - held - cartTotal;
+  const q = SH.query.trim().toLowerCase();
+  const shown = cats.map(c => ({ ...c, items: (c.items || []).filter(i => !q || i.name.toLowerCase().includes(q) || String(i.effect || '').toLowerCase().includes(q)) }))
+    .filter(c => c.items.length && (SH.filter === 'All' || c.name === SH.filter));
+  const catsHTML = shown.map(c => `
+    <section class="panel sh-cat" style="--c:${esc(c.color || '#9aa3a6')}">
+      <h2>${esc(c.name)}</h2>${c.note ? `<p class="sh-note">${esc(c.note)}</p>` : ''}
+      ${c.items.map(i => {
+        const inCart = cart.find(x => x.id === i.id), price = shopInt(i.price);
+        const soldOut = i.left === 0, cantAfford = !inCart && price > spare;
+        return `
+        <div class="sh-row">
+          <span class="sh-name"><b>${esc(i.name)}</b>${shopTypeTag(i.type)}${i.effect ? `<span class="sh-eff">${esc(i.effect)}</span>` : ''}</span>
+          <span class="sh-left">${i.left == null ? '' : soldOut ? '<span class="tag red">Sold out</span>' : `<span class="tag">${i.left} left</span>`}</span>
+          <span class="sh-price">${money(price)}</span>
+          <span class="sh-act">${preview ? '' : inCart
+            ? `<span class="sh-qty"><button type="button" data-sact="cart-dec" data-id="${esc(i.id)}" aria-label="One less">−</button><b>${inCart.qty}</b><button type="button" data-sact="cart-inc" data-id="${esc(i.id)}" aria-label="One more" ${price > spare || (i.left != null && inCart.qty >= i.left) || inCart.qty >= 20 ? 'disabled' : ''}>+</button></span>`
+            : `<button type="button" class="btn sm" data-sact="cart-add" data-id="${esc(i.id)}" ${soldOut || cantAfford ? 'disabled' : ''} title="${soldOut ? 'Sold out' : cantAfford ? 'Not enough money' : 'Add to cart'}">+ Cart</button>`}</span>
+        </div>`;
+      }).join('')}
+    </section>`).join('');
+  const chips = ['All', ...cats.filter(c => (c.items || []).length).map(c => c.name)];
+  const cartLines = cart.map(x => { const f = cats.flatMap(c => c.items || []).find(i => i.id === x.id); return f ? `
+      <div class="sh-cline"><span>${esc(f.name)}${x.qty > 1 ? ` ×${x.qty}` : ''}</span><span>${money(shopInt(f.price) * x.qty)} <button type="button" class="icon-btn" data-sact="cart-rm" data-id="${esc(x.id)}" aria-label="Remove ${esc(f.name)}">×</button></span></div>` : ''; }).join('');
+  return `
+    <div class="sh-head"><h1 class="page-title">The Shop</h1>
+      ${preview ? '<span class="tag brass">Player preview</span>' : `<span class="sh-money"><small>Money left</small><b>${money(have)}</b>${held ? `<small>${money(held)} waiting for the GM</small>` : ''}</span>`}</div>
+    <div class="sh-tools">
+      <div class="sh-chips">${chips.map(n => `<button type="button" class="sh-chip ${SH.filter === n ? 'on' : ''}" data-sact="filter" data-v="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+      <input type="search" class="sh-search" data-sfield="query" placeholder="Search the shop" value="${esc(SH.query)}" aria-label="Search the shop">
+    </div>
+    <div class="sh-grid ${preview ? 'preview' : ''}">
+      <div class="sh-cats">${catsHTML || '<p class="dim">Nothing matches.</p>'}</div>
+      ${preview ? '' : `
+      <aside class="panel sh-cart">
+        <h2>Your cart</h2>
+        ${cartLines || '<p class="small dim">Empty. Add something from the shelves.</p>'}
+        <div class="sh-total"><span>Total</span><b>${money(cartTotal)}</b></div>
+        <div class="sh-after"><span>Left after approval</span><b class="${spare < 0 ? 'sh-neg' : ''}">${money(have - held - cartTotal)}</b></div>
+        <button type="button" class="btn brass sh-buy" data-sact="order" ${!cart.length || spare < 0 ? 'disabled' : ''}>${spare < 0 ? 'Not enough money' : 'Request purchase'}</button>
+        <p class="small dim">The GM approves every purchase. When they do, the money comes off your sheet and the items land in your Gear or Kit.</p>
+      </aside>`}
+    </div>
+    ${preview ? '' : myOrdersHTML()}`;
+}
+function myOrdersHTML() {
+  const mineOrders = (SH.data.orders || []).filter(o => o.sheet_id === mine()).slice(0, 15);
+  if (!mineOrders.length) return '';
+  return `<section class="panel sh-orders"><h2>Your orders</h2>${mineOrders.map(o => `
+    <div class="sh-order">
+      <span class="sh-when">${relTime(o.created_at)}</span>
+      <span class="sh-items">${(o.items || []).map(x => esc(x.name) + (x.qty > 1 ? ' ×' + x.qty : '')).join(', ')}</span>
+      <span class="sh-ototal">${money(o.total)}</span>
+      <span class="sh-ostat"><span class="tag ${o.status === 'approved' ? 'green' : o.status === 'pending' ? 'brass' : o.status === 'declined' ? 'red' : ''}">${o.gift ? 'From the GM' : SHOP_STATUS[o.status]}</span>
+        ${o.status === 'pending' ? `<button type="button" class="btn sm ghost" data-sact="cancel" data-id="${o.id}">Cancel</button>` : ''}</span>
+    </div>`).join('')}</section>`;
+}
+
+function shopGmHTML() {
+  const d = SH.data, n = pendingCount();
+  return `
+    <div class="sh-head"><h1 class="page-title">The Shop</h1><span class="small dim">${SH.saving ? 'Saving…' : SH.dirty ? 'Unsaved' : 'Saved'}</span></div>
+    <div class="sh-banner ${d.open ? 'live' : ''}">
+      <span>${d.open ? 'The shop is open. Players see names and prices, and effects only where you reveal them.' : 'The shop is closed. Only you can see it.'}</span>
+      <button type="button" class="btn ${d.open ? '' : 'brass'}" data-sact="open" data-v="${d.open ? 0 : 1}">${d.open ? 'Close the shop' : 'Open the shop to players'}</button>
+    </div>
+    <div class="sh-tabs" role="tablist">
+      <button type="button" role="tab" class="${SH.tab === 'requests' ? 'on' : ''}" data-sact="tab" data-v="requests">Requests${n ? ` <span class="sh-badge">${n}</span>` : ''}</button>
+      <button type="button" role="tab" class="${SH.tab === 'catalog' ? 'on' : ''}" data-sact="tab" data-v="catalog">Catalogue</button>
+    </div>
+    ${SH.tab === 'requests' ? shopRequestsHTML() : SH.preview ? `<div class="sh-tools"><button type="button" class="btn sm" data-sact="preview">← Back to editing</button></div>${shopPlayerHTML(true)}` : shopEditorHTML()}`;
+}
+function shopRequestsHTML() {
+  const orders = SH.data.orders || [];
+  const pend = orders.filter(o => o.status === 'pending'), rest = orders.filter(o => o.status !== 'pending').slice(0, 40);
+  const row = o => {
+    const rec = S.sheets.get(o.sheet_id), has = rec && rec.data.money ? Number(rec.data.money.left) || 0 : 0;
+    const short = o.status === 'pending' && has < o.total;
+    return `
+    <div class="sh-req ${o.status}">
+      <span class="sh-who">${rec ? avatarHTML(rec, 'xs') : ''}<b>${esc(o.who)}</b><small>${relTime(o.created_at)}</small></span>
+      <span class="sh-items">${(o.items || []).map(x => `${esc(x.name)}${x.qty > 1 ? ' ×' + x.qty : ''} <small>${money(x.price * x.qty)}</small>`).join(', ')}</span>
+      <span class="sh-ototal">${money(o.total)}${o.status === 'pending' ? `<small class="${short ? 'sh-neg' : ''}">has ${money(has)}</small>` : ''}</span>
+      <span class="sh-ostat">${o.status === 'pending'
+        ? `<button type="button" class="btn sm brass" data-sact="approve" data-id="${o.id}" ${short ? 'disabled title="Not enough money on their sheet"' : ''}>Approve</button><button type="button" class="btn sm" data-sact="decline" data-id="${o.id}">Decline</button>`
+        : `<span class="tag ${o.status === 'approved' ? 'green' : o.status === 'declined' ? 'red' : ''}">${o.gift ? 'Given' : SHOP_STATUS[o.status]}</span>${o.status === 'approved' ? `<button type="button" class="btn sm ghost" data-sact="refund" data-id="${o.id}">Refund</button>` : ''}`}</span>
+    </div>`;
+  };
+  const players = orderedSheets();
+  const items = shopItems(SH.data.catalog);
+  return `
+    <section class="panel"><h2>Waiting for you</h2>${pend.length ? pend.map(row).join('') : '<p class="small dim">No requests right now. Players’ purchase requests appear here.</p>'}</section>
+    <section class="panel sh-give"><h2>Give an item</h2>
+      <p class="small dim" style="margin-top:-6px">Hand a player anything from the catalogue, free or at a price you set (e.g. Ray fronts the car). It goes straight to their sheet.</p>
+      <div class="sh-give-row">
+        <select data-sgive="sheet" aria-label="Player"><option value="">Player…</option>${players.map(r => `<option value="${r.id}" ${SH.give.sheet === r.id ? 'selected' : ''}>${esc(r.data.name || 'Unnamed')}</option>`).join('')}</select>
+        <select data-sgive="item" aria-label="Item"><option value="">Item…</option>${SH.data.catalog.map(c => `<optgroup label="${esc(c.name)}">${(c.items || []).map(i => `<option value="${esc(i.id)}" ${SH.give.item === i.id ? 'selected' : ''}>${esc(i.name)} (${money(shopInt(i.price))})</option>`).join('')}</optgroup>`).join('')}</select>
+        <label class="sh-mini">Qty <input type="number" min="1" max="20" data-sgive="qty" value="${SH.give.qty}"></label>
+        <label class="sh-mini">Price each $ <input type="number" min="0" data-sgive="price" value="${SH.give.price}"></label>
+        <button type="button" class="btn" data-sact="give">Give</button>
+      </div>
+    </section>
+    <section class="panel"><h2>History</h2>${rest.length ? rest.map(row).join('') : '<p class="small dim">Nothing yet.</p>'}</section>`;
+}
+function shopEditorHTML() {
+  const d = SH.data, full = SH.full;
+  return `
+    <div class="sh-tools">
+      <span class="seg-toggle"><button type="button" class="${full ? '' : 'on'}" data-sact="notes" data-v="0">Short notes</button><button type="button" class="${full ? 'on' : ''}" data-sact="notes" data-v="1">Full notes</button></span>
+      <button type="button" class="btn sm" data-sact="preview">👁 Player preview</button>
+      <button type="button" class="btn sm" data-sact="cat-add">+ Add category</button>
+    </div>
+    ${d.catalog.map((c, ci) => {
+      const anyHiddenFx = (c.items || []).some(i => !i.shown), anyHidden = (c.items || []).some(i => i.hidden);
+      return `
+      <section class="panel sh-cat sh-edit ${c.hidden ? 'is-hidden' : ''}" style="--c:${esc(c.color || '#9aa3a6')}">
+        <div class="sh-ehead">
+          <input class="sh-cname" data-sfield="cat.name" data-c="${ci}" value="${esc(c.name)}" aria-label="Category name">
+          <input type="color" data-sfield="cat.color" data-c="${ci}" value="${esc(/^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#9aa3a6')}" aria-label="Category colour">
+          ${c.hidden ? '<span class="tag red">hidden from players</span>' : ''}
+          <span class="spacer"></span>
+          <button type="button" class="btn sm" data-sact="cat-fx" data-c="${ci}">${anyHiddenFx ? 'Reveal all effects' : 'Hide all effects'}</button>
+          <button type="button" class="btn sm" data-sact="cat-items" data-c="${ci}">${anyHidden ? 'Show all items' : 'Hide all items'}</button>
+          <button type="button" class="btn sm" data-sact="cat-hide" data-c="${ci}">${c.hidden ? 'Show category' : 'Hide category'}</button>
+          <button type="button" class="icon-btn" data-sact="cat-del" data-c="${ci}" aria-label="Delete category ${esc(c.name)}" title="Delete category">×</button>
+        </div>
+        <input class="sh-cnote" data-sfield="cat.note" data-c="${ci}" value="${esc(c.note || '')}" placeholder="Note for players (optional), e.g. Wear up to 3 pieces." aria-label="Category note">
+        ${(c.items || []).map((i, ii) => shopEditRow(i, ci, ii, full)).join('')}
+        <button type="button" class="btn sm" data-sact="item-add" data-c="${ci}">+ Add item</button>
+      </section>`;
+    }).join('')}`;
+}
+function shopEditRow(i, ci, ii, full) {
+  const sold = shopInt(SH.data.sold[i.id]);
+  const at = `data-c="${ci}" data-i="${ii}"`;
+  const stats = i.type === 'weapon'
+    ? `<label class="sh-mini">Damage <input data-sfield="it.dmg" ${at} value="${esc((i.dice || 1) + 'd' + (i.die || 6) + (shopInt(i.bonus) ? (shopInt(i.bonus) > 0 ? '+' : '') + shopInt(i.bonus) : ''))}" style="width:70px" aria-label="Damage dice"></label>
+       <select data-sfield="it.stat" ${at} aria-label="Damage stat"><option value="">No stat</option>${STATS.map(s => `<option value="${s.k}" ${i.stat === s.k ? 'selected' : ''}>${s.n}</option>`).join('')}</select>
+       <label class="sh-mini">Effect <input data-sfield="it.wfx" ${at} value="${esc(i.wfx || '')}" style="width:90px" aria-label="Weapon effect"></label>`
+    : i.type === 'armor'
+    ? `<label class="sh-mini">Reduces <input type="number" min="0" max="20" data-sfield="it.reduction" ${at} value="${shopInt(i.reduction)}" style="width:52px"></label>
+       <label class="sh-mini">Hits <input type="number" min="0" max="50" data-sfield="it.durability" ${at} value="${shopInt(i.durability)}" style="width:52px"></label>` : '';
+  return `
+    <div class="sh-erow ${i.hidden ? 'is-hidden' : ''}">
+      <div class="sh-eline">
+        <input class="sh-iname" data-sfield="it.name" ${at} value="${esc(i.name)}" aria-label="Item name">
+        <label class="sh-mini sh-iprice">$<input type="number" min="0" max="1000000" data-sfield="it.price" ${at} value="${shopInt(i.price)}" aria-label="Price"></label>
+        <input class="sh-ieff" data-sfield="it.effect" ${at} value="${esc(i.effect || '')}" placeholder="Short roll / effect" aria-label="Roll or effect">
+        <button type="button" class="btn sm sh-reveal ${i.shown ? 'on' : ''}" data-sact="item-fx" ${at} title="${i.shown ? 'Players can see the effect' : 'Players can’t see the effect'}">${i.shown ? '👁 Shown' : 'Hidden'}</button>
+        <label class="sh-mini" title="Leave empty for unlimited">Stock <input type="number" min="0" max="999" data-sfield="it.stock" ${at} value="${i.stock == null ? '' : shopInt(i.stock)}" placeholder="∞" style="width:52px"></label>
+        ${sold ? `<span class="small dim">${sold} sold</span>` : ''}
+        <button type="button" class="btn sm" data-sact="item-hide" ${at}>${i.hidden ? 'Show' : 'Hide'}</button>
+        <button type="button" class="icon-btn" data-sact="item-del" ${at} aria-label="Delete ${esc(i.name)}">×</button>
+      </div>
+      <div class="sh-eline sub">
+        <select data-sfield="it.type" ${at} aria-label="Goes to">${SHOP_TYPES.map(([v, l]) => `<option value="${v}" ${(i.type || 'item') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        ${stats}
+        <textarea class="sh-inotes ${full ? 'full' : ''}" data-sfield="it.notes" ${at} rows="${full ? 3 : 1}" placeholder="GM notes (only you)" aria-label="GM notes">${esc(i.notes || '')}</textarea>
+      </div>
+    </div>`;
+}
+
+// ── GM edits: change the local catalogue, save shortly after ──
+function shopSaveSoon() {
+  SH.dirty = true;
+  clearTimeout(SH.saveT);
+  SH.saveT = setTimeout(shopSaveNow, 700);
+  const st = document.querySelector('.sh-head .small'); if (st) st.textContent = 'Unsaved';
+}
+async function shopSaveNow(extra = {}) {
+  clearTimeout(SH.saveT);
+  if (!isGM() || !SH.data) return;
+  SH.saving = true; SH.dirty = false;
+  try {
+    await api('gm_shop_save', { p_room: SHOP_ROOM, p_open: extra.open ?? null, p_catalog: extra.onlyOpen ? null : SH.data.catalog });
+    send('shop', {});
+  } catch (err) { SH.dirty = true; fail(err); }
+  SH.saving = false;
+  const st = document.querySelector('.sh-head .small'); if (st) st.textContent = SH.dirty ? 'Unsaved' : 'Saved';
+}
+function shopField(el) {
+  const f = el.dataset.sfield, d = SH.data;
+  if (f === 'query') { SH.query = el.value; return 'render'; }
+  if (!isGM() || !d) return;
+  const c = d.catalog[+el.dataset.c];
+  if (!c) return;
+  if (f.startsWith('cat.')) { c[f.slice(4)] = f === 'cat.color' ? el.value : el.value.slice(0, 120); shopSaveSoon(); return f === 'cat.color' ? 'render' : null; }
+  const i = (c.items || [])[+el.dataset.i];
+  if (!i) return;
+  const k = f.slice(3), v = el.value;
+  if (k === 'price') i.price = Math.max(0, Math.min(1000000, shopInt(v)));
+  else if (k === 'stock') i.stock = v === '' ? null : Math.max(0, Math.min(999, shopInt(v)));
+  else if (k === 'reduction' || k === 'durability') i[k] = Math.max(0, shopInt(v));
+  else if (k === 'dmg') { const m = String(v).replace(/\s/g, '').match(/^(\d+)d(\d+)([+-]\d+)?$/i); if (m) { i.dice = Math.max(1, Math.min(20, +m[1])); i.die = Math.max(2, Math.min(10, +m[2])); i.bonus = m[3] ? +m[3] : 0; } }
+  else if (k === 'type') { i.type = v; shopSaveSoon(); return 'render'; }
+  else i[k] = String(v).slice(0, k === 'notes' ? 2000 : 160);
+  shopSaveSoon();
+}
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (!el.dataset) return;
+  if (el.dataset.sfield) { if (shopField(el) === 'render') renderShopSafe(); }
+  if (el.dataset.sgive) { const k = el.dataset.sgive; SH.give[k] = k === 'qty' || k === 'price' ? Math.max(k === 'qty' ? 1 : 0, shopInt(el.value)) : el.value; }
+});
+document.addEventListener('change', e => {
+  const el = e.target;
+  if (el.dataset && el.dataset.sfield === 'query') return;
+  if (el.dataset && (el.dataset.sfield === 'it.type' || el.dataset.sfield === 'cat.color' || el.dataset.sfield === 'it.stat')) { shopField(el); renderShopSafe(); }
+  if (el.dataset && el.dataset.sgive) { const k = el.dataset.sgive; SH.give[k] = k === 'qty' || k === 'price' ? Math.max(k === 'qty' ? 1 : 0, shopInt(el.value)) : el.value; }
+});
+document.addEventListener('keyup', e => { if (e.target.dataset && e.target.dataset.sfield === 'query') { SH.query = e.target.value; clearTimeout(SH.qT); SH.qT = setTimeout(() => { const el = $('.sh-search'); const pos = el && el.selectionStart; const r = $('#shop-root'); if (r) { r.outerHTML = shopHTML(); const n = $('.sh-search'); if (n) { n.focus({ preventScroll: true }); try { n.setSelectionRange(pos, pos); } catch { /* ignore */ } } } }, 200); } });
+
+async function shopAction(el) {
+  const a = el.dataset.sact, d = SH.data;
+  if (!d) return;
+  const c = d.catalog[+el.dataset.c], i = c && (c.items || [])[+el.dataset.i];
+  const key = a + ':' + (el.dataset.id || '');
+  const once = async fn => { if (SH.busy.has(key)) return; SH.busy.add(key); el.disabled = true; try { await fn(); } finally { SH.busy.delete(key); } };
+  switch (a) {
+    case 'filter': SH.filter = el.dataset.v; break;
+    case 'tab': SH.tab = el.dataset.v; SH.preview = false; break;
+    case 'notes': SH.full = el.dataset.v === '1'; break;
+    case 'preview': SH.preview = !SH.preview; break;
+    // Player cart (kept on this device)
+    case 'cart-add': { const cart = getCart(); if (!cart.find(x => x.id === el.dataset.id)) cart.push({ id: el.dataset.id, qty: 1 }); setCart(cart); break; }
+    case 'cart-inc': case 'cart-dec': {
+      const cart = getCart(), x = cart.find(y => y.id === el.dataset.id);
+      if (x) x.qty = Math.max(0, Math.min(20, x.qty + (a === 'cart-inc' ? 1 : -1)));
+      setCart(cart.filter(y => y.qty > 0)); break;
+    }
+    case 'cart-rm': setCart(getCart().filter(y => y.id !== el.dataset.id)); break;
+    case 'order':
+      await once(async () => {
+        const cart = getCart();
+        if (!cart.length) return;
+        try {
+          const o = await api('shop_order', { p_room: SHOP_ROOM, p_items: cart.map(x => ({ id: x.id, qty: x.qty })) });
+          setCart([]); send('shop', {});
+          toast(`Request sent to the GM: ${money(o.total)}.`);
+          await fetchShop();
+        } catch (err) { fail(err); await fetchShop(); }
+      });
+      break;
+    case 'cancel':
+      await once(async () => { try { await api('shop_cancel', { p_order: +el.dataset.id }); send('shop', {}); toast('Request cancelled.'); } catch (err) { fail(err); } await fetchShop(); });
+      break;
+    // GM
+    case 'open': await shopSaveNow({ open: el.dataset.v === '1', onlyOpen: !SH.dirty }); await fetchShop(); toast(el.dataset.v === '1' ? 'The shop is open.' : 'The shop is closed.'); break;
+    case 'approve': case 'decline':
+      await once(async () => {
+        try { await api('gm_shop_decide', { p_order: +el.dataset.id, p_approve: a === 'approve' }); send('shop', {}); ping(); toast(a === 'approve' ? 'Approved. It’s on their sheet.' : 'Declined.'); }
+        catch (err) { fail(err); }
+        await fetchShop(); sync();
+      });
+      break;
+    case 'refund': {
+      const o = d.orders.find(x => x.id === +el.dataset.id);
+      if (!o || !confirm(`Refund ${o.who} ${money(o.total)} and take these items off their sheet?\n\n${(o.items || []).map(x => x.name + (x.qty > 1 ? ' ×' + x.qty : '')).join(', ')}`)) break;
+      await once(async () => { try { await api('gm_shop_refund', { p_order: o.id }); send('shop', {}); ping(); toast('Refunded.'); } catch (err) { fail(err); } await fetchShop(); sync(); });
+      break;
+    }
+    case 'give': {
+      const g = SH.give, it = findShopItem(g.item), rec = S.sheets.get(g.sheet);
+      if (!it || !rec) { toast('Pick a player and an item.', true); break; }
+      if (!confirm(`Give ${rec.data.name} ${it.it.name}${g.qty > 1 ? ' ×' + g.qty : ''}${g.price ? ` for ${money(g.price * g.qty)}` : ' for free'}?`)) break;
+      await once(async () => {
+        try { await api('gm_shop_give', { p_room: SHOP_ROOM, p_sheet: g.sheet, p_item: g.item, p_qty: g.qty, p_price: g.price }); send('shop', {}); ping(); toast('Given.'); SH.give = { sheet: '', item: '', qty: 1, price: 0 }; }
+        catch (err) { fail(err); }
+        await fetchShop(); sync();
+      });
+      break;
+    }
+    case 'cat-add': d.catalog.push({ id: 'c' + uid(), name: 'New category', color: '#9aa3a6', note: '', hidden: false, items: [] }); shopSaveSoon(); break;
+    case 'cat-del': if (c && confirm(`Delete the category “${c.name}” and its ${(c.items || []).length} items? Past orders are kept.`)) { d.catalog.splice(+el.dataset.c, 1); shopSaveSoon(); } break;
+    case 'cat-hide': if (c) { c.hidden = !c.hidden; shopSaveSoon(); } break;
+    case 'cat-fx': if (c) { const any = (c.items || []).some(x => !x.shown); (c.items || []).forEach(x => { x.shown = any; }); shopSaveSoon(); } break;
+    case 'cat-items': if (c) { const any = (c.items || []).some(x => x.hidden); (c.items || []).forEach(x => { x.hidden = !any; }); shopSaveSoon(); } break;
+    case 'item-add': if (c) { (c.items = c.items || []).push({ id: 'i' + uid(), name: 'New item', price: 0, effect: '', shown: false, notes: '', hidden: false, stock: null, type: 'item' }); shopSaveSoon(); } break;
+    case 'item-del': if (i && confirm(`Delete “${i.name}” from the shop? Past orders are kept.`)) { c.items.splice(+el.dataset.i, 1); shopSaveSoon(); } break;
+    case 'item-hide': if (i) { i.hidden = !i.hidden; shopSaveSoon(); } break;
+    case 'item-fx': if (i) { i.shown = !i.shown; shopSaveSoon(); } break;
+  }
+  if (S.route.view === 'shop') { const r = $('#shop-root'); if (r) { const y = window.scrollY; r.outerHTML = shopHTML(); window.scrollTo(0, y); } }
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-sact]');
+  if (el && !el.disabled) shopAction(el);
+});
+window.addEventListener('pagehide', () => { if (SH.dirty && isGM()) shopSaveNow(); });
 
 // ── Rendering: character sheet ─────────────────────────────────────────────
 
@@ -4717,7 +5143,7 @@ function parseRoute() {
   const h = location.hash.replace(/^#\/?/, '');
   const [view, id] = h.split('/');
   if (view === 'c' && id) return { view: 'sheet', id };
-  if (['rules', 'gm', 'scenes'].includes(view)) return { view };
+  if (['rules', 'gm', 'scenes', 'shop'].includes(view)) return { view };
   return { view: 'crew' };
 }
 
@@ -4726,6 +5152,7 @@ window.addEventListener('hashchange', () => {
   S.route = parseRoute();
   if (prev.view !== S.route.view || prev.id !== S.route.id) { S.customize = false; S.vaultMenu = null; window.scrollTo(0, 0); }
   if (S.route.view === 'gm') { S.gmNotes = null; S.gmSessions = null; }
+  if (S.route.view === 'shop' && prev.view !== 'shop') fetchShop();
   if (S.logOpen && window.matchMedia('(max-width: 1100px)').matches) S.logOpen = false;
   if (!S.ready) return;
   renderNav(); renderMain(); renderLog();
@@ -4739,6 +5166,7 @@ function boot() {
   sync();
   startPolling();
   startMusic();
+  startShop();
   setInterval(() => { if (S.ready && !document.hidden) { renderLogTimes(); if (S.route.view === 'crew') renderChat(); } }, 30000);
 }
 function renderLogTimes() {
