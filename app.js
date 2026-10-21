@@ -816,6 +816,7 @@ async function sync() {
 
     if (!S.ready) { initChatSeen(); S.ready = true; renderApp(); trackPresence(); fetchShop(); return; }
     if (changed.size) { renderNav(); renderOnline(); refreshTokPickers(); }
+    else if (liveChanged) renderRail();
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);
     if (rulesChanged && S.route.view === 'rules') refreshMain(new Set(), true);
     if (crewChanged) renderClock();
@@ -1283,12 +1284,20 @@ function renderApp() {
       <div class="me" id="me"></div>
     </header>
     <div class="layout">
+      <nav class="rail" id="rail" aria-label="Pages">
+        <div class="rail-pages" id="rail-pages"></div>
+        <div class="rail-live" id="rail-live"></div>
+        <button class="rail-i rl-tabbtn" id="rl-tab" data-act="live-menu" title="Live scenes" hidden>
+          <svg class="rail-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">${RAIL_ICONS.live}</svg>
+          <span class="rail-l">Live</span><span class="rail-b live-rb"></span></button>
+        <div class="rl-menu" id="rl-menu" hidden></div>
+      </nav>
       <main class="main" id="main"></main>
       <aside class="log" id="log" aria-label="Dice"></aside>
     </div>
     <div id="net" class="net-banner" role="status" aria-live="polite"></div>
     <div id="chat-pops" class="cpops" aria-live="polite"></div>
-    <div id="scene-root"><div class="pill-bar" id="pill-bar"></div></div>
+    <div id="scene-root"></div>
     <button class="log-fab" id="log-fab" data-act="log-toggle" aria-label="Open dice">${die(22)}<span id="fab-last"></span></button>
     <input type="file" id="file-portrait" accept="image/*" hidden>
     <input type="file" id="file-import" accept="application/json,.json" hidden>
@@ -1391,28 +1400,51 @@ function renderNav() {
   const nav = $('#nav');
   if (!nav) return;
   const r = S.route;
-  // Players: Crew, Rules, their own sheet, then everyone else's.
+  // The pages live in the rail; the top bar is just the characters, your own first.
   const sheets = orderedSheets().sort((a, b) => (b.id === mine()) - (a.id === mine()));
-  const liveCount = S.live.filter(s => s.kind !== 'board').length;
-  nav.innerHTML = [
-    `<a href="#/crew" class="${r.view === 'crew' ? 'on' : ''}">Crew</a>`,
-    `<a href="#/rules" class="${r.view === 'rules' ? 'on' : ''}">Rules</a>`,
-    ...(isGM() || shopOpen() ? [`<a href="#/shop" class="${r.view === 'shop' ? 'on' : ''}">Shop${isGM() && pendingCount() ? ` <span class="sh-navbadge" title="${pendingCount()} request${pendingCount() === 1 ? '' : 's'} waiting">${pendingCount()}</span>` : ''}</a>`] : []),
-    ...sheets.map(rec =>
-      `<a href="#/c/${rec.id}" class="${r.view === 'sheet' && r.id === rec.id ? 'on' : ''} ${rec.id === mine() ? 'mine' : ''}">
-         <span class="sw" style="background:${esc(accentOf(rec))}"></span>${esc(rec.data.name || 'Unnamed')}${rec.id === mine() ? ' <small class="you">you</small>' : ''}</a>`),
-    ...(isGM() ? [
-      `<a href="#/scenes" class="gm-link ${r.view === 'scenes' ? 'on' : ''}">Scenes${liveCount ? ` <small class="live-count">${liveCount} live</small>` : ''}</a>`,
-      `<a href="#/gm" class="gm-link ${r.view === 'gm' ? 'on' : ''}">GM</a>`,
-    ] : []),
-  ].join('');
-  renderChatAlerts();
+  renderRail();
+  nav.innerHTML = sheets.map(rec =>
+    `<a href="#/c/${rec.id}" class="${r.view === 'sheet' && r.id === rec.id ? 'on' : ''} ${rec.id === mine() ? 'mine' : ''}">
+       <span class="sw" style="background:${esc(accentOf(rec))}"></span>${esc(rec.data.name || 'Unnamed')}${rec.id === mine() ? ' <small class="you">you</small>' : ''}</a>`).join('');
   const me = $('#me');
   const rec = S.sheets.get(mine());
   me.innerHTML = `
     ${rec ? avatarHTML(rec, 'sm') : '<span class="avatar sm gm-av">GM</span>'}
     <span class="me-name">${esc(myName())}</span>
     <button class="btn sm ghost" data-act="logout">Log out</button>`;
+}
+
+// Left rail (bottom bar on phones): the pages, each an icon with a small label.
+const RAIL_ICONS = {
+  crew: '<circle cx="12" cy="8" r="3.2"/><path d="M6.5 19.5c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><circle cx="5.5" cy="10" r="2.3"/><path d="M2 18c.4-2 1.7-3.3 3.6-3.5"/><circle cx="18.5" cy="10" r="2.3"/><path d="M22 18c-.4-2-1.7-3.3-3.6-3.5"/>',
+  rules: '<path d="M12 6.5C10 5 7.5 4.5 4 4.8v13c3.5-.3 6 .2 8 1.7 2-1.5 4.5-2 8-1.7v-13c-3.5-.3-6 .2-8 1.7z"/><path d="M12 6.5v13"/>',
+  shop: '<path d="M5 8h14l-1 12H6z"/><path d="M9 10V6.5a3 3 0 0 1 6 0V10"/>',
+  scenes: '<path d="M3.5 6.5 9 4.5l6 2 5.5-2v13l-5.5 2-6-2-5.5 2z"/><path d="M9 4.5v13M15 6.5v13"/>',
+  gm: '<circle cx="6.5" cy="12" r="3.5"/><path d="M10 12h11"/><path d="M17 12v3.5M20 12v2.5"/>',
+  live: '<circle cx="12" cy="12" r="2.2"/><path d="M8 8a5.5 5.5 0 0 0 0 8M16 8a5.5 5.5 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>',
+};
+function renderRail() {
+  const pages = $('#rail-pages');
+  if (!pages) return;
+  const r = S.route, live = S.live.filter(s => s.kind !== 'board').length, pend = isGM() ? pendingCount() : 0;
+  const item = (view, label, badge = '', gm = false) =>
+    `<a href="#/${view}" class="rail-i ${gm ? 'rail-gm' : ''} ${r.view === view ? 'on' : ''}" title="${label}"${r.view === view ? ' aria-current="page"' : ''}>
+       <svg class="rail-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${RAIL_ICONS[view]}</svg>
+       <span class="rail-l">${label}</span>${badge}</a>`;
+  const html = [
+    item('crew', 'Crew'),
+    item('rules', 'Rules'),
+    ...(isGM() || shopOpen() ? [item('shop', 'Shop', pend ? `<span class="rail-b sh-rb" title="${pend} request${pend === 1 ? '' : 's'} waiting">${pend}</span>` : '')] : []),
+    ...(isGM() ? [
+      '<span class="rail-sep" aria-hidden="true"></span>',
+      item('scenes', 'Scenes', live ? `<span class="rail-b live-rb" title="${live} live">${live}</span>` : '', true),
+      item('gm', 'GM', '', true),
+    ] : []),
+  ].join('');
+  // Rebuilt only when it changes: sheets sync every few seconds and a swap would eat a click.
+  if (html !== pages._html) { pages.innerHTML = html; pages._html = html; }
+  renderLive();
+  renderChatAlerts();   // the unread badge sits on Crew
 }
 
 // Re-render the main view without losing the caret in the field being typed in.
@@ -1433,7 +1465,6 @@ function renderMain() {
   else if (r.view === 'shop') main.innerHTML = shopHTML();
   else { main.innerHTML = crewHTML(); mountBoard(); renderChat(true); }
   S.deferRender = false;
-  fitPills();
 
   if (key) {
     const el = main.querySelector(`[data-bind="${CSS.escape(key)}"], [data-fk="${CSS.escape(key)}"]`);
@@ -1677,13 +1708,13 @@ function chatArrived(list) {
 function renderChatAlerts() {
   if (!S.me) return setTabAlert(0);
   const un = unreadChat(), n = un.length, priv = un.some(m => m.private);
-  const link = document.querySelector('#nav a[href="#/crew"]');
+  const link = document.querySelector('#rail a[href="#/crew"]');
   if (link) {
     let b = link.querySelector('.nav-badge');
     if (!n) { if (b) b.remove(); }
     else {
       const label = n > 9 ? '9+' : String(n);
-      if (!b) { b = document.createElement('span'); b.className = 'nav-badge'; link.appendChild(b); }
+      if (!b) { b = document.createElement('span'); b.className = 'nav-badge rail-b'; link.appendChild(b); }
       if (b.textContent !== label) { b.textContent = label; b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
       b.classList.toggle('priv', priv);
       b.title = `${n} unread message${n === 1 ? '' : 's'}${priv ? ', including a private one' : ''}`;
@@ -3781,7 +3812,7 @@ async function saveTurns(mutate) {
   st.current = Math.max(0, Math.min(st.entries.length - 1, st.current));
   for (const list of [S.scenes || [], S.live]) { const x = list.find(y => y.id === sc.id); if (x) x.state = clone(st); }
   renderTurnsViews();
-  renderPills();
+  renderLive();
   try { await api('gm_scene_state', { p_id: sc.id, p_state: st }); ping(); }
   catch (err) { fail(err); S.since = null; }
 }
@@ -4285,9 +4316,10 @@ function winState(id) {
   const w = S.wins[id] || (S.wins[id] = {});
   if (w.x == null) {
     const taken = S.live.filter(s => s.id !== id && S.wins[s.id] && S.wins[s.id].x != null).map(s => S.wins[s.id].x + ',' + S.wins[s.id].y);
+    const x0 = window.matchMedia('(min-width: 901px)').matches ? 100 : 24;   // clear of the rail
     let k = 0;
-    while (taken.includes((24 + k * 36) + ',' + (84 + k * 36))) k++;
-    w.x = 24 + k * 36; w.y = 84 + k * 36; w.w = 600; w.h = 480;
+    while (taken.includes((x0 + k * 36) + ',' + (84 + k * 36))) k++;
+    w.x = x0 + k * 36; w.y = 84 + k * 36; w.w = 600; w.h = 480;
   }
   return w;
 }
@@ -4328,62 +4360,82 @@ function renderScenes() {
     }
   });
   renderTurnsViews();
-  renderPills();
+  renderLive();
   saveWins();
 }
 
-// Minimised windows sit as pills bottom-left. The Turn Order pill still shows
-// the round, whose turn it is, and who's next.
-function renderPills() {
-  const bar = $('#pill-bar');
-  if (!bar) return;
-  const live = S.live.filter(s => s.kind !== 'board' && S.wins[s.id] && S.wins[s.id].min);
-  bar.innerHTML = live.map(sc => sc.kind === 'turns' ? turnsPillHTML(sc)
-    : `<button class="scene-pill" data-act="win-restore" data-id="${sc.id}" title="${esc(sc.title || 'Untitled')}: open"><span class="live-dot"></span><b>${esc(sc.title || 'Untitled')}</b></button>`).join('');
-  fitPills();
-}
-
-// Wide screens stack the minimised scenes in a column at the bottom-left. If the
-// page content would sit under that column, push it right just far enough.
-// Narrow screens keep them along the bottom with room to scroll past.
-function fitPills() {
-  const bar = $('#pill-bar'), main = $('#main');
-  if (!bar || !main) return;
-  const any = bar.children.length > 0;
-  document.body.classList.toggle('has-pills', any);
-  let pad = 0;
-  if (any && window.matchMedia('(min-width: 901px)').matches) {
-    // Centred content only moves half as far as the padding, so measure again until it clears.
-    const content = main.firstElementChild, edge = bar.getBoundingClientRect().right + 14;
-    const left = () => (content ? content.getBoundingClientRect().left : main.getBoundingClientRect().left + 22);
-    for (let i = 0; i < 6; i++) {
-      main.style.setProperty('--pills-pad', pad + 'px');
-      const overlap = Math.ceil(edge - left());
-      if (overlap <= 0) break;
-      pad += overlap;
-    }
-  }
-  main.style.setProperty('--pills-pad', pad + 'px');
-}
-window.addEventListener('resize', () => { clearTimeout(fitPills.t); fitPills.t = setTimeout(fitPills, 120); });
-
-function turnsPillHTML(sc) {
+// Every live scene has a tile in the rail (a list behind the Live tab on phones).
+// A tile opens its window, brings it to the front, or minimises it when it's
+// already on top. The Turn Order tile shows the round and whose turn it is.
+const VAULT_ICON = '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 8.5v1.2M12 14.3v1.2M8.5 12h1.2M14.3 12h1.2"/>';
+function liveScenes() { return S.live.filter(s => s.kind !== 'board'); }
+function turnsInfo(sc) {
   const st = normTurns((turnsScene() || sc).state);
   const nameOf = e => { const r = e && e.sheet_id && S.sheets.get(e.sheet_id); return r ? r.data.name : (e ? e.name : ''); };
   const cur = st.entries[st.current], next = st.entries.length > 1 ? st.entries[(st.current + 1) % st.entries.length] : null;
   const rec = cur && cur.sheet_id && S.sheets.get(cur.sheet_id);
-  const key = `${st.round}|${st.current}|${cur ? cur.id : ''}`;
-  const changed = S.turnPillKey != null && S.turnPillKey !== key;
-  S.turnPillKey = key;
-  const av = rec ? avatarHTML(rec, 'xs') : `<span class="avatar xs">${esc((nameOf(cur) || '·').charAt(0).toUpperCase())}</span>`;
-  return `
-    <button class="scene-pill turn-pill ${changed ? 'bump' : ''}" data-act="win-restore" data-id="${sc.id}"
-      style="--accent:${esc(rec ? accentOf(rec) : '#9aa3a6')}" title="Turn Order: open">
-      <span class="tp-round">R${st.round}</span>
-      ${cur ? `${av}<span class="tp-now"><b>${esc(nameOf(cur))}</b><small>${next ? 'next: ' + esc(nameOf(next)) : 'their turn'}</small></span>`
-            : '<span class="tp-now"><b>Turn Order</b><small>not set up yet</small></span>'}
-    </button>`;
+  return { st, cur, rec, now: cur ? nameOf(cur) : '', next: next ? nameOf(next) : '', key: `${st.round}|${st.current}|${cur ? cur.id || nameOf(cur) : ''}` };
 }
+function winOpen(id) { const w = S.wins[id]; return !!w && !w.min; }
+function liveTileHTML(sc, bump) {
+  const open = winOpen(sc.id), title = sc.title || 'Untitled';
+  if (sc.kind === 'turns') {
+    const t = turnsInfo(sc);
+    const av = t.rec ? avatarHTML(t.rec, 'xs') : `<span class="avatar xs">${esc((t.now || '·').charAt(0).toUpperCase())}</span>`;
+    return `<button class="rl-tile rl-turns ${open ? 'open' : ''} ${bump ? 'bump' : ''}" data-act="win-tile" data-id="${sc.id}"
+      style="--accent:${esc(t.rec ? accentOf(t.rec) : '#9aa3a6')}" title="Turn Order${t.cur ? `: ${esc(t.now)} now${t.next ? ', next ' + esc(t.next) : ''}` : ''}">
+      <span class="rl-round">R${t.st.round}</span>${av}<span class="rl-name">${t.cur ? esc(t.now.split(/\s+/)[0]) : 'Turns'}</span></button>`;
+  }
+  return `<button class="rl-tile ${open ? 'open' : ''}" data-act="win-tile" data-id="${sc.id}" title="${esc(title)}">
+    <span class="live-dot"></span><svg class="rl-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${sc.kind === 'vault' ? VAULT_ICON : RAIL_ICONS.scenes}</svg>
+    <span class="rl-name">${esc(title)}</span></button>`;
+}
+function liveRowHTML(sc) {
+  const open = winOpen(sc.id), title = sc.title || 'Untitled';
+  if (sc.kind === 'turns') {
+    const t = turnsInfo(sc);
+    return `<button class="rl-row ${open ? 'open' : ''}" data-act="win-tile" data-id="${sc.id}"><span class="rl-round">R${t.st.round}</span>
+      <span class="rl-txt"><b>Turn Order</b><small>${t.cur ? `${esc(t.now)} now${t.next ? ' · next ' + esc(t.next) : ''}` : 'not set up yet'}</small></span></button>`;
+  }
+  return `<button class="rl-row ${open ? 'open' : ''}" data-act="win-tile" data-id="${sc.id}"><span class="live-dot"></span><span class="rl-txt"><b>${esc(title)}</b></span></button>`;
+}
+function renderLive() {
+  const box = $('#rail-live'), menu = $('#rl-menu'), tab = $('#rl-tab');
+  if (!box) return;
+  const live = liveScenes();
+  const turns = live.find(s => s.kind === 'turns');
+  const key = turns ? turnsInfo(turns).key : null;
+  // A new turn makes the tile bump; it stays marked for the length of the animation
+  // so a second render in the same moment doesn't cancel it.
+  if (S.turnPillKey != null && key != null && S.turnPillKey !== key) S.turnBumpUntil = Date.now() + 700;
+  S.turnPillKey = key;
+  const bump = Date.now() < (S.turnBumpUntil || 0);
+  // Only touch the DOM when something changed, so a click never lands on a tile mid-swap.
+  const html = live.length ? `<span class="rl-head">Live</span>${live.map(sc => liveTileHTML(sc, bump && sc === turns)).join('')}` : '';
+  if (html !== box._html) { box.innerHTML = html; box._html = html; }
+  if (!live.length) S.liveMenu = false;
+  tab.hidden = !live.length;
+  tab.classList.toggle('on', !!S.liveMenu);
+  tab.querySelector('.rail-b').textContent = live.length;
+  menu.hidden = !S.liveMenu;
+  const rows = live.map(liveRowHTML).join('');
+  if (rows !== menu._html) { menu.innerHTML = rows; menu._html = rows; }
+}
+function winTile(id) {
+  const st = S.wins[id], w = winEls.get(id);
+  if (!st) return;
+  const onTop = w && ![...winEls].some(([id2, w2]) => id2 !== id && winOpen(id2) && +w2.style.zIndex > +w.style.zIndex);
+  if (st.min) st.min = false;
+  else if (onTop) { st.min = true; st.full = false; }
+  if (w && !st.min) w.style.zIndex = ++S.z;
+  renderScenes();
+}
+document.addEventListener('pointerdown', e => {
+  if (S.liveMenu && !e.target.closest('#rail')) { S.liveMenu = false; renderLive(); }
+});
+document.addEventListener('keydown', e => {
+  if (S.liveMenu && e.key === 'Escape') { S.liveMenu = false; renderLive(); }
+});
 
 function buildWindow(sc) {
   const w = document.createElement('div');
@@ -5063,7 +5115,8 @@ document.addEventListener('click', async e => {
     }
 
     // Scene windows
-    case 'win-restore': { const st = S.wins[el.dataset.id]; if (st) st.min = false; renderScenes(); break; }
+    case 'win-tile': S.liveMenu = false; winTile(el.dataset.id); break;
+    case 'live-menu': S.liveMenu = !S.liveMenu; renderLive(); break;
 
     // Vault
     case 'vault-box': {
