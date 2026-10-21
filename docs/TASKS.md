@@ -20,6 +20,11 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 26 (2026-10-21): music fade-in and compact chip
+- [x] New tracks start quietly: before a new video/playlist/mood loads the player is set to 0 and fades up to the listener's level (`fadeIn`, ~4 s; 3 s for a mood change on the same video; 1.5 s when the GM resumes). Playlists hush the next song when it's cued (state -1). Moving the slider stops a fade. New listeners default to slider 20 (2%).
+- [x] Music chip: speaker + short layered-waves canvas (28×16, drawn not measured: YouTube audio can't be read; amplitude follows your volume, flat when paused/muted). Players see the mood name slide out for 4 s when music starts, the mood changes, or the GM pauses ("Paused by the GM"), then the pill shrinks (~68 px). GM paused = brass "GM" tag + pause; your own mute = red speaker with a cross. GM chip keeps its label. Banner uses the waves too.
+- Tested with real playback in the dev room: default level 2, fade 0→level on start/new video/same-video mood change, label timing and width, GM-paused and muted states, GM chip, no app console errors. Deployed `?v=28`.
+
 ## Round 25 (2026-10-21): music volume curve
 - [x] The music slider now follows loudness, not YouTube's linear volume: slider 1–100 maps geometrically onto YouTube 1–40 (`musicLevel`, `MUSIC_MAX = 40`): 10 → 1, 20 → 2, 30 → 3, 40 → 4, 50 → 6, 70 → 13, 100 → 40. Default 30. Saved settings move to `debt.musicVol2`, converted so they sound the same (old 2 → 20, old 3 → 30; anything above 40 → 100).
 - [x] Bug found while testing: `applyVolume` called `setVolume()` then `unMute()`, and YouTube's unMute lifts anything under 5 back to 5, so every level below 5% played at 5%. Now it unmutes first (only if muted) and sets the level after. Checked against the real player: every slider step gives the expected YouTube volume, mute and unmute work. Deployed `?v=27`.

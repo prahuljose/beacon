@@ -499,6 +499,7 @@ const DIE_SHAPES = {
   20: 'polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%)',
 };
 const SOUND_ON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
+const PAUSE_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
 const SOUND_OFF_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="m17 9 5 5M22 9l-5 5"/></svg>';
 const reducedMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -1822,7 +1823,7 @@ function loadMusicVol() {
   if (Number.isFinite(v2)) return Math.max(0, Math.min(100, v2));
   // Carry over the old linear setting so it sounds the same as before.
   const old = parseInt(lsGet('debt.musicVol'), 10);
-  const s = !Number.isFinite(old) ? 30 : old <= 0 ? 0 : Math.round(1 + 99 * Math.log(Math.min(old, MUSIC_MAX)) / Math.log(MUSIC_MAX));
+  const s = !Number.isFinite(old) ? 20 : old <= 0 ? 0 : Math.round(1 + 99 * Math.log(Math.min(old, MUSIC_MAX)) / Math.log(MUSIC_MAX));
   lsSet('debt.musicVol2', String(s));
   return s;
 }
@@ -1950,7 +1951,26 @@ function fadeOutThen(done) {
     if (i >= steps) { clearInterval(iv); done(); M.fading = false; applyVolume(); }
   }, 100);
 }
+// New tracks start silent and rise to your level, so a loud one never hits at full volume.
+function fadeIn(ms = 4000) {
+  clearInterval(M.fadeIv); M.fadeIv = null;
+  if (!M.ready || M.muted || M.vol === 0) { applyVolume(); return; }
+  const target = musicLevel(M.vol), steps = Math.max(1, Math.round(ms / 150));
+  let i = 0;
+  try { if (M.player.isMuted()) M.player.unMute(); M.player.setVolume(0); } catch { /* not ready */ }
+  M.fadeIv = setInterval(() => {
+    i++;
+    try { M.player.setVolume(Math.round(target * Math.min(1, i / steps))); } catch { /* ignore */ }
+    if (i >= steps) { clearInterval(M.fadeIv); M.fadeIv = null; }
+  }, 150);
+}
+function quietForNext(ms) {
+  M.fadeMs = ms;
+  if (M.muted || M.vol === 0) return;
+  try { M.player.setVolume(0); } catch { /* ignore */ }
+}
 function applyVolume() {
+  clearInterval(M.fadeIv); M.fadeIv = null;
   if (!M.ready) return;
   // Unmute first, then set the level: YouTube's unMute() lifts anything under 5 back up to 5.
   try {
@@ -1971,8 +1991,12 @@ function syncPlayer(force) {
   const p = M.player, key = `${st.vid || ''}|${st.list || ''}|${st.list ? (st.index || 0) : ''}`;
   const start = Math.max(0, musicTarget(st));
   try {
+    // A new mood fades in even when it reuses the same video.
+    const moodChanged = M.lastMood !== undefined && (st.mood || '') !== M.lastMood;
+    M.lastMood = st.mood || '';
     if (key !== M.curKey || force) {
       M.curKey = key;
+      if (st.playing) quietForNext(4000);
       if (st.list) {
         const args = { listType: 'playlist', list: st.list, index: st.index || 0, startSeconds: start };
         st.playing ? p.loadPlaylist(args) : p.cuePlaylist(args);
@@ -1984,7 +2008,8 @@ function syncPlayer(force) {
       return;
     }
     const ps = p.getPlayerState();
-    if (st.playing && ps !== 1 && ps !== 3) { p.seekTo(start, true); p.playVideo(); }
+    if (moodChanged && st.playing && ps === 1) fadeIn(3000);
+    if (st.playing && ps !== 1 && ps !== 3) { quietForNext(1500); p.seekTo(start, true); p.playVideo(); }
     if (!st.playing && ps === 1) fadeOutThen(() => { try { if (!M.state.playing) p.pauseVideo(); } catch { /* ignore */ } });
     if (!st.playing && Math.abs((p.getCurrentTime() || 0) - start) > 2) p.seekTo(start, true);
   } catch { /* player busy */ }
@@ -2017,6 +2042,9 @@ function musicTick() {
   } else if (ps !== 3) syncPlayer();
 }
 function onPlayerState(code) {
+  // Playlists move on by themselves: hush the next song (-1 = new video cued), fade it in once it plays.
+  if (code === -1 && M.state.playing) quietForNext(4000);
+  if (code === 1 && M.fadeMs) { const ms = M.fadeMs; M.fadeMs = 0; fadeIn(ms); }
   // A single video that ends starts again (loop), playlists loop themselves.
   if (code === 0 && !M.state.list && M.state.loop !== false && M.state.playing) { try { M.player.seekTo(0, true); M.player.playVideo(); } catch { /* ignore */ } }
   if (isGM() && code === 0 && !M.state.list && M.state.loop === false && M.state.playing) gmMusic({ playing: false, pos: 0 });
@@ -2055,16 +2083,64 @@ function renderMusic() {
   if (!host) return;
   const st = M.state, src = hasSource(st), gm = isGM();
   if (!gm && !src) { host.innerHTML = ''; return; }
-  const label = !src ? 'Music' : (st.mood || st.title || 'Music');
-  const live = src && st.playing && M.unlocked && !M.muted && M.vol > 0;
+  const paused = src && !st.playing, muted = M.muted || M.vol === 0;
+  const live = src && st.playing && M.unlocked && !muted;
+  const name = !src ? 'Music' : paused ? 'Paused by the GM' : (st.mood || st.title || 'Music');
+  // Players see the name for a few seconds when music starts, the mood changes, or the GM pauses it.
+  const key = !src ? '' : paused ? 'paused' : (st.mood || st.title || st.vid || st.list);
+  let fresh = false;
+  if (!gm && key && key !== M.labelKey) { M.labelKey = key; M.labelUntil = Date.now() + 4000; fresh = true; }
+  const showing = gm || Date.now() < (M.labelUntil || 0);
+  const icon = paused ? `<span class="mc-gm" aria-hidden="true">GM</span>${PAUSE_SVG}` : muted ? SOUND_OFF_SVG : SOUND_ON_SVG;
+  const tip = gm ? 'Music: you control it for everyone' : paused ? 'The GM paused the music' : muted ? 'Music muted (only for you)' : `Music: ${st.mood || st.title || 'from the GM'}`;
   host.innerHTML = `
-    <button class="music-chip ${live ? 'live' : ''} ${src && st.playing && !M.unlocked ? 'waiting' : ''}" data-mact="toggle" aria-expanded="${M.open}" title="${gm ? 'Music: you control it for everyone' : 'Music from the GM'}">
-      <span class="m-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-      <span class="mc-label">${esc(label)}${src && !st.playing ? ' <small>paused</small>' : ''}</span>
+    <button class="music-chip ${live ? 'live' : ''} ${paused ? 'gm-paused' : ''} ${muted && !paused ? 'muted' : ''} ${src && st.playing && !M.unlocked ? 'waiting' : ''} ${gm ? 'is-gm' : ''}" data-mact="toggle" aria-expanded="${M.open}" title="${esc(tip)}" aria-label="${esc(tip)}">
+      <span class="mc-icon">${icon}</span>
+      ${paused ? '' : `<canvas class="m-wave" width="56" height="32" data-amp="${live ? (0.35 + 0.65 * M.vol / 100).toFixed(2) : 0}" aria-hidden="true"></canvas>`}
+      <span class="mc-label ${showing && !fresh ? 'show' : ''}">${esc(name)}</span>
     </button>
     <div class="music-pop" id="music-pop" ${M.open ? '' : 'hidden'}></div>`;
+  const lab = host.querySelector('.mc-label');
+  if (!gm && lab) {
+    if (fresh) requestAnimationFrame(() => requestAnimationFrame(() => lab.classList.add('show')));
+    clearTimeout(M.labelT);
+    const left = (M.labelUntil || 0) - Date.now();
+    if (left > 0) M.labelT = setTimeout(() => { const l = $('#music .mc-label'); if (l) l.classList.remove('show'); }, left);
+  }
+  startWaves();
   if (M.open) renderMusicPop();
 }
+
+// Layered waves on the music chip. YouTube's audio can't be read from the
+// page, so this is drawn, not measured: it moves while music plays for you,
+// grows with your volume, and lies flat when paused or muted.
+const waveAmp = new WeakMap();
+let waveRaf = 0;
+function startWaves() { if (!waveRaf) waveRaf = requestAnimationFrame(drawWaves); }
+function drawWaves(now) {
+  waveRaf = 0;
+  const cvs = document.querySelectorAll('canvas.m-wave');
+  if (!cvs.length || document.hidden) return;
+  const t = now / 1000;
+  for (const c of cvs) {
+    const ctx = c.getContext('2d'), W = c.width, H = c.height, mid = H / 2;
+    const target = +c.dataset.amp || 0, a = (waveAmp.get(c) ?? 0) + ((target - (waveAmp.get(c) ?? 0)) * 0.08);
+    waveAmp.set(c, a);
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    [['rgba(201,162,75,.95)', 1, 5, 0], ['rgba(201,162,75,.5)', 0.7, 7.3, 1.3], ['rgba(230,223,203,.35)', 0.5, 3.6, 2.4]].forEach(([col, k, sp, ph]) => {
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 2) {
+        const u = x / W, y = mid + Math.sin(Math.PI * u) * a * k * (H * 0.4) * Math.sin(u * 8 + t * sp + ph);
+        x ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    });
+  }
+  waveRaf = requestAnimationFrame(drawWaves);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) startWaves(); });
 function listenersHTML() {
   const pm = S.presence || {}, rows = [];
   const seen = new Set();
@@ -2158,7 +2234,8 @@ function renderMusicBanner() {
     b.dataset.mact = 'join';
     document.body.appendChild(b);
   }
-  b.innerHTML = `<span class="m-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span> The GM is playing music · <b>Tap to listen</b>`;
+  b.innerHTML = `${SOUND_ON_SVG}<canvas class="m-wave" width="56" height="32" data-amp="0.8" aria-hidden="true"></canvas> The GM is playing music · <b>Tap to listen</b>`;
+  startWaves();
 }
 function unlockMusic() {
   if (M.unlocked || !S.me) return;
@@ -2221,7 +2298,7 @@ document.addEventListener('click', async e => {
     case 'toggle': M.open = !M.open; renderMusic(); placeGmVideo(); break;
     case 'join': unlockMusic(); break;
     case 'mute':
-      if (M.vol === 0) { M.vol = 30; M.muted = false; } else M.muted = !M.muted;
+      if (M.vol === 0) { M.vol = 20; M.muted = false; } else M.muted = !M.muted;
       lsSet('debt.musicVol2', String(M.vol)); lsSet('debt.musicMute', M.muted ? '1' : '0');
       applyVolume(); renderMusic(); musicPresenceChanged();
       break;

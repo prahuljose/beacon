@@ -1632,3 +1632,24 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 .ol-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ol-name .ol-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ol-name .you { flex: none; }
+
+/* v20: compact music chip. Speaker + short layered waves; players see the
+   mood name slide out for a few seconds, then the pill shrinks back. */
+.music-chip { gap: 6px; padding: 0 9px; max-width: none; }
+.mc-icon { display: inline-flex; align-items: center; gap: 3px; color: var(--brass); flex: none; }
+.mc-icon svg { width: 14px; height: 14px; }
+.music-chip.muted .mc-icon { color: #e07b6f; }
+.music-chip.gm-paused { border-color: rgba(201,162,75,.55); }
+.music-chip.gm-paused .mc-icon svg { width: 11px; height: 11px; }
+.mc-gm { font-family: var(--slab); font-size: 9px; line-height: 1; letter-spacing: .04em; color: #1b1f22; background: var(--brass); border-radius: 3px; padding: 2px 3px; }
+.m-wave { width: 28px; height: 16px; flex: none; display: block; }
+.music-chip:not(.is-gm) .mc-label { max-width: 0; opacity: 0; margin-left: -6px; overflow: hidden; white-space: nowrap; transition: max-width .5s ease, opacity .35s ease, margin .5s ease; }
+.music-chip:not(.is-gm) .mc-label.show { max-width: 170px; opacity: 1; margin-left: 0; }
+.music-chip:not(.is-gm).waiting { animation: chip-wait 1.8s ease-in-out infinite; }
+@keyframes chip-wait { 50% { box-shadow: 0 0 0 4px rgba(201,162,75,.18); } }
+.music-chip .mc-label { font-size: 12.5px; }
+.music-banner svg { width: 15px; height: 15px; flex: none; }
+.music-banner .m-wave { width: 28px; height: 16px; }
+@media (min-width: 901px) and (max-width: 1360px) { .music-chip.is-gm .mc-label { display: none; } }
+@media (prefers-reduced-motion: reduce) { .music-chip:not(.is-gm) .mc-label { transition: none; } .music-chip.waiting { animation: none; } }
+@media (min-width: 901px) and (max-width: 1360px) { .music-chip:not(.is-gm) .mc-label { display: inline-block; } }
