@@ -1124,6 +1124,8 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
 .ol-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px dashed var(--line); }
 .ol-row .avatar.xs { width: 26px; height: 26px; font-size: 12px; }
 .ol-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ol-seen { font-size: 11px; line-height: 1.2; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ol-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
 .ol-row.online .ol-status { color: #9fe3b6; }
 .ol-row.away .ol-status { color: #f2d27a; }

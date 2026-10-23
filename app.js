@@ -447,18 +447,44 @@ function statusOf(id, pm) {
 }
 const STATUS_LABEL = { online: 'Online', away: 'Away', offline: 'Offline', nologin: 'No login yet' };
 
+// Last seen: each open app checks in about once a minute (v11 `seen`) and gets
+// everyone's last check-in back. Presence fills the gap: anyone we see here now
+// counts as seen now, so someone who just left reads "just now".
+const SEEN = { at: {}, local: {} };
+async function touchSeen() {
+  if (!S.token || !S.me) return;
+  try { SEEN.at = (await api('seen')) || {}; renderOnline(); } catch { /* try again next minute */ }
+}
+setInterval(touchSeen, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) touchSeen(); });
+function markPresent(pm) { const now = Date.now(); for (const id of pm.keys()) SEEN.local[id] = now; }
+function lastSeen(id) { return Math.max(Date.parse(SEEN.at[id]) || 0, SEEN.local[id] || 0) || null; }
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function seenText(ms) {
+  const d = new Date(ms), now = new Date(), mins = Math.floor((now - d) / 60000);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  if (d.toDateString() === now.toDateString()) return `${Math.floor(mins / 60)} h ago`;
+  if (d.toDateString() === new Date(now - 864e5).toDateString()) return `yesterday, ${hm}`;
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : ''}, ${hm}`;
+}
+
 function renderOnline() {
   const host = $('#online');
   if (!host) return;
   const pm = presenceMap(), sheets = orderedSheets();
+  markPresent(pm);
   const here = sheets.filter(r => ['online', 'away'].includes(statusOf(r.id, pm)));
   const faces = here.slice(0, 4).map(r => avatarHTML(r, 'xs')).join('');
   const rows = [{ id: 'gm', name: 'Game Master', rec: null }, ...sheets.map(r => ({ id: r.id, name: r.data.name || 'Unnamed', rec: r }))].map(x => {
-    const st = statusOf(x.id, pm);
+    const st = statusOf(x.id, pm), seen = st === 'offline' && lastSeen(x.id);
     return `
       <div class="ol-row ${st}">
         ${x.rec ? avatarHTML(x.rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
-        <span class="ol-name"><span class="ol-n">${esc(x.name)}</span>${(x.id === 'gm' && isGM()) || x.id === mine() ? '<small class="you">you</small>' : ''}</span>
+        <span class="ol-who"><span class="ol-name"><span class="ol-n">${esc(x.name)}</span>${(x.id === 'gm' && isGM()) || x.id === mine() ? '<small class="you">you</small>' : ''}</span>
+          ${seen ? `<small class="ol-seen" title="${esc(new Date(seen).toLocaleString())}">last seen ${seenText(seen)}</small>` : ''}</span>
         <span class="ol-status"><i class="ol-dot"></i>${STATUS_LABEL[st]}</span>
       </div>`;
   }).join('');
@@ -814,7 +840,7 @@ async function sync() {
 
     if (isGM() && r.scenes_sig !== S.scenesSig) { S.scenesSig = r.scenes_sig; loadScenes(); }
 
-    if (!S.ready) { initChatSeen(); S.ready = true; renderApp(); trackPresence(); fetchShop(); return; }
+    if (!S.ready) { initChatSeen(); S.ready = true; renderApp(); trackPresence(); fetchShop(); touchSeen(); return; }
     if (changed.size) { renderNav(); renderOnline(); refreshTokPickers(); }
     else if (liveChanged) renderRail();
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);

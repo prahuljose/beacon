@@ -20,6 +20,10 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 30 (2026-10-24): last seen
+- [x] supabase/v11.sql (applied): `public.last_seen` (who = sheet id or 'gm', at) kept out of `sheets` so check-ins never trigger sheet re-syncs; RPC `seen(p_token)` stamps the caller and returns everyone's times. Tested in a rolled-back block (player + GM rows, bad session rejected, table not readable by anon).
+- [x] Who's here: offline rows show "last seen …" in small grey text under the name (mockup B), full date on hover. Wording: just now / N min ago / N h ago (today) / yesterday, HH:MM / Tue 21 Oct, HH:MM (+year if not this year). The app checks in on load, every minute and when the tab comes back; presence fills the gap (anyone seen here counts as seen now), so someone who just left reads "just now". Times start recording from this release, so offline players show no line until their next visit. Deployed `?v=32`.
+
 ## Round 29 (2026-10-21): vault door reveal
 - [x] Login vault door: the overlay is now a wall with a round hole exactly behind the door (`.vd-wall`, CSS mask). When the door swings open the portal shows only through the doorway, then the whole vault scales up (`.vdoor.zoom`, scale 4.5, 1 s) until the page is fully revealed. Timeline: dial/bolts 0–1.5 s, door opens 1.5 s, zoom 2.4 s, removed 3.45 s. Click still skips; reduced motion still skips entirely.
 - [x] The wall uses the login screen's own background (body stripes + `.login` glow and hairline frame, via `.vd-glow` lined up with the login page's box), so the backdrop doesn't change when the door appears. Checked with headless Chrome against the real login page: background pixels match within 1/255. Welcome text is positioned under the door so the hole stays centred. Deployed `?v=31`.
