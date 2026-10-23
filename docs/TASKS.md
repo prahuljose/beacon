@@ -20,6 +20,12 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 32 (2026-10-24): New divider, chat alert settings, loading skeletons
+- [x] Chat "New" divider: when the chat comes into view with unread messages (opening the app on Crew, switching to Crew, coming back to the tab, or opening the chat from a pop-up), a red NEW line sits above the first unread message, and the list starts there if it's off the top. It stays until you leave Crew or send a message. Also fixes: opening the app straight onto Crew now marks the chat read.
+- [x] Chat alert settings: gear on the chat panel opens three switches, saved per login on this device (`debt.chatPrefs.<id>`): ding when mentioned, pop-ups for new messages (badge still counts), count @everyone as a mention. Turning the ding on plays a sample. Esc / click outside closes; survives redraws.
+- [x] Loading skeletons: the app's first load shows the page's shape in grey (header, rail, two panels, crew cards, dice column; phone header rows and bottom bar) built from the real layout classes; the login page shows the GM card and four tile placeholders instead of "Loading the crew…". Shimmer off with reduced motion.
+- Tested locally (player + temporary GM, private messages only): divider placement, visibility, persistence and clearing; each setting off and back on (pop-ups, ding, @everyone, badge still counts); settings panel open/close; skeletons rendered against the real pages at desktop and phone sizes; all pages; no console errors beyond a stale-session 403. Deployed `?v=34`.
+
 ## Round 31 (2026-10-24): chat extras
 - [x] supabase/v12.sql (applied; tested first in a rolled-back transaction): `chat.reactions` ({emoji: [sheet id | 'gm']}), `chat.reacted_at`, `chat.image` ({w, h}); `public.chat_images` (picture data, one row per message, newest 50 kept). RPCs `chat_react` (toggle; fixed set 👍 ❤️ 😂 😮 💀 🎲), `chat_send_image` (same rules and rate limit as chat_send, which is untouched; max 600 KB), `chat_image` (only if you can see the message and it isn't deleted). `sync` = v8 plus `chat_react` (reaction changes on messages a client already has).
 - [x] @mentions: typing @ offers the GM, everyone and each character (arrows/Enter/Tab pick, Esc closes); full names, @GM, @everyone and unique first names are highlighted, your own in gold. A message mentioning you is tinted, gives a gold Crew badge, a longer "@ you" pop-up and a soft two-note ding (only when you're not looking at the chat).

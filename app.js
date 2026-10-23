@@ -847,7 +847,13 @@ async function sync() {
 
     if (isGM() && r.scenes_sig !== S.scenesSig) { S.scenesSig = r.scenes_sig; loadScenes(); }
 
-    if (!S.ready) { initChatSeen(); S.ready = true; renderApp(); trackPresence(); fetchShop(); touchSeen(); return; }
+    if (!S.ready) {
+      initChatSeen(); S.ready = true;
+      if (chatInView()) openNewMark();
+      renderApp();
+      if (chatInView()) markChatSeen();
+      trackPresence(); fetchShop(); touchSeen(); return;
+    }
     if (changed.size) { renderNav(); renderOnline(); refreshTokPickers(); }
     else if (liveChanged) renderRail();
     if (changed.size || crewChanged || (vaultChanged && S.route.view === 'scenes') || (liveChanged && S.route.view === 'scenes')) refreshMain(changed, crewChanged);
@@ -895,7 +901,10 @@ function startPolling() {
   clearInterval(pollTimer);
   pollTimer = setInterval(() => { if (!document.hidden) sync(); }, POLL_MS);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ready) { sync(); if (chatInView()) markChatSeen(); } trackPresence(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && S.ready) { sync(); if (chatInView()) { const had = S.newMark; openNewMark(); if (S.newMark !== had) renderChat(); markChatSeen(); } }
+  trackPresence();
+});
 
 // ── Saving edits ───────────────────────────────────────────────────────────
 
@@ -1173,7 +1182,7 @@ function vaultDoor(name) {
 
 async function renderLogin(msg) {
   clearInterval(pollTimer);
-  app.innerHTML = `<div class="login"><div class="login-inner"><header class="login-brand"><div class="logo-die"><i></i><i></i><i></i></div>${neonHTML()}<p>Loading the crew…</p></header></div></div>`;
+  app.innerHTML = `<div class="login"><div class="login-inner" aria-busy="true"><header class="login-brand"><div class="logo-die"><i></i><i></i><i></i></div>${neonHTML()}<p>Crew portal</p></header>${loginSkeletonHTML()}</div></div>`;
   let options = [];
   try { options = await rpc('login_options'); }
   catch { app.querySelector('.login-brand p').textContent = 'Couldn’t reach the server. Refresh to try again.'; return; }
@@ -1645,7 +1654,9 @@ function crewHTML() {
           <p class="small dim" style="margin:8px 0 0">Spend 1 Grit to add 1d6 to any d6 roll, yours or anyone else’s, even after seeing it. Use <b>+ Grit</b> on a roll in the dice log. Max 1 per roll.</p>
         </section>
         <section class="panel s5 chat-panel">
-          <h2>Chat</h2>
+          <h2><span class="grow">Chat</span>
+            <button type="button" class="cs-btn" data-act="chat-prefs" aria-expanded="${!!S.chatPrefsOpen}" title="Chat alerts" aria-label="Chat alert settings">${GEAR_SVG}</button></h2>
+          ${S.chatPrefsOpen ? chatPrefsHTML() : ''}
           <div class="chat-list" id="chat-list"></div>
           <form class="chat-form" id="chat-form">
             <div class="chat-att" id="chat-att" ${S.chatImg ? '' : 'hidden'}>${chatAttHTML()}</div>
@@ -1685,39 +1696,51 @@ function renderChat(force) {
   const list = $('#chat-list');
   if (!list) return;
   const nearBottom = force || list.scrollHeight - list.scrollTop - list.clientHeight < 60;
-  const nameOf = id => { const r = S.sheets.get(id); return r ? r.data.name : 'a player'; };
-  list.innerHTML = S.chat.length ? S.chat.map(m => {
-    const rec = m.sheet_id && S.sheets.get(m.sheet_id);
-    const color = rec ? accentOf(rec) : GM_COLOR;
-    let tag = '';
-    if (m.private) {
-      const fromMe = isGM() ? !m.sheet_id : m.sheet_id === mine();
-      tag = isGM()
-        ? (m.sheet_id ? `Private from ${esc(m.who)}` : `Private to ${esc(nameOf(m.to_sheet))}`)
-        : (fromMe ? 'Private to the GM' : 'Private from the GM');
-      tag = `<span class="tag private">${EYE_OFF_SVG} ${tag}</span>`;
-      if (isGM() && m.sheet_id && !fromMe) tag += ` <button class="btn sm ghost chat-reply" data-act="chat-reply" data-id="${m.sheet_id}">Reply privately</button>`;
-    }
-    const rxBtn = `<button type="button" class="chat-rx" data-act="react-pick" data-id="${m.id}" title="React" aria-label="React to this message">${SMILE_SVG}</button>`;
-    if (m.kind === 'shop') return `
-      <div class="chat-msg shop-line">
-        ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
-        <div class="chat-main"><span class="sh-bag" aria-hidden="true">🛒</span> <b style="color:${esc(color)}">${esc(m.who)}</b> ${esc(m.body)} <span class="chat-time">${relTime(m.created_at)}</span>${reactsHTML(m)}</div>
-        ${rxBtn}
-        ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete shop message">${TRASH_SVG}</button>` : ''}
-      </div>`;
-    return `
-      <div class="chat-msg ${m.private ? 'private' : ''} ${mentionsMe(m) ? 'ment' : ''}">
-        ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
-        <div class="chat-main"><b style="color:${esc(color)}">${esc(m.who)}</b> <span class="chat-time">${relTime(m.created_at)}</span> ${tag}
-          ${m.body ? `<div class="chat-body">${chatBodyHTML(m.body)}</div>` : ''}${m.image ? chatImgHTML(m) : ''}${reactsHTML(m)}</div>
-        ${rxBtn}
-        ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete message from ${esc(m.who)}">${TRASH_SVG}</button>` : ''}
-      </div>`;
-  }).join('') : '<p class="small dim" style="margin:auto">No messages yet.</p>';
+  const first = S.newMark == null ? null : S.chat.find(m => m.id > S.newMark && !chatFromMe(m));
+  list.innerHTML = S.chat.length
+    ? S.chat.map(m => (first && m.id === first.id ? '<div class="chat-new" role="separator" aria-label="New messages start here"><span>New</span></div>' : '') + chatMsgHTML(m)).join('')
+    : '<p class="small dim" style="margin:auto">No messages yet.</p>';
   if (nearBottom) list.scrollTop = list.scrollHeight;
+  // Just opened with unread messages: if the first new one is off the top, start there.
+  const line = list.querySelector('.chat-new');
+  if (S.newMarkScroll && line) {
+    const above = line.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    if (above < 0) list.scrollTop += above - 6;
+  }
+  S.newMarkScroll = false;
   observeChatImgs(list);
   if (MN.open) renderMentionList();   // the page may have been redrawn under an open name list
+}
+
+function chatMsgHTML(m) {
+  const nameOf = id => { const r = S.sheets.get(id); return r ? r.data.name : 'a player'; };
+  const rec = m.sheet_id && S.sheets.get(m.sheet_id);
+  const color = rec ? accentOf(rec) : GM_COLOR;
+  let tag = '';
+  if (m.private) {
+    const fromMe = isGM() ? !m.sheet_id : m.sheet_id === mine();
+    tag = isGM()
+      ? (m.sheet_id ? `Private from ${esc(m.who)}` : `Private to ${esc(nameOf(m.to_sheet))}`)
+      : (fromMe ? 'Private to the GM' : 'Private from the GM');
+    tag = `<span class="tag private">${EYE_OFF_SVG} ${tag}</span>`;
+    if (isGM() && m.sheet_id && !fromMe) tag += ` <button class="btn sm ghost chat-reply" data-act="chat-reply" data-id="${m.sheet_id}">Reply privately</button>`;
+  }
+  const rxBtn = `<button type="button" class="chat-rx" data-act="react-pick" data-id="${m.id}" title="React" aria-label="React to this message">${SMILE_SVG}</button>`;
+  if (m.kind === 'shop') return `
+    <div class="chat-msg shop-line">
+      ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
+      <div class="chat-main"><span class="sh-bag" aria-hidden="true">🛒</span> <b style="color:${esc(color)}">${esc(m.who)}</b> ${esc(m.body)} <span class="chat-time">${relTime(m.created_at)}</span>${reactsHTML(m)}</div>
+      ${rxBtn}
+      ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete shop message">${TRASH_SVG}</button>` : ''}
+    </div>`;
+  return `
+    <div class="chat-msg ${m.private ? 'private' : ''} ${mentionsMe(m) ? 'ment' : ''}">
+      ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
+      <div class="chat-main"><b style="color:${esc(color)}">${esc(m.who)}</b> <span class="chat-time">${relTime(m.created_at)}</span> ${tag}
+        ${m.body ? `<div class="chat-body">${chatBodyHTML(m.body)}</div>` : ''}${m.image ? chatImgHTML(m) : ''}${reactsHTML(m)}</div>
+      ${rxBtn}
+      ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete message from ${esc(m.who)}">${TRASH_SVG}</button>` : ''}
+    </div>`;
 }
 
 // ── Chat alerts: unread badge on Crew, pop-up cards, tab title ─────────────
@@ -1731,6 +1754,13 @@ const chatSeen = () => { const v = parseInt(lsGet(chatSeenKey()), 10); return Nu
 const chatMaxId = () => S.chat.reduce((a, m) => Math.max(a, m.id), 0);
 const unreadChat = () => { const seen = chatSeen(); return S.chat.filter(m => m.id > seen && !chatFromMe(m)); };
 const chatInView = () => !!S.me && S.route.view === 'crew' && !document.hidden;
+
+// "New" divider: when the chat comes into view with unread messages, remember
+// where they start. It stays until you leave the Crew page or send a message.
+function openNewMark() {
+  const seen = chatSeen();
+  if (S.chat.some(m => m.id > seen && !chatFromMe(m))) { S.newMark = seen; S.newMarkScroll = true; }
+}
 
 // First visit on this browser: start from now, not from the whole history.
 function initChatSeen() {
@@ -1752,8 +1782,9 @@ function chatArrived(list) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(m);
   }
-  for (const msgs of groups.values()) chatPop(msgs);
-  if (list.some(m => m.id > chatSeen() && mentionsMe(m))) dingMention();
+  const prefs = chatPrefs();
+  if (prefs.pops) for (const msgs of groups.values()) chatPop(msgs);
+  if (prefs.ding && list.some(m => m.id > chatSeen() && mentionsMe(m))) dingMention();
   renderChatAlerts();
 }
 
@@ -1882,7 +1913,7 @@ function openChat() {
     if (input) input.focus({ preventScroll: true });
     markChatSeen();
   };
-  if (S.route.view === 'crew') go();
+  if (S.route.view === 'crew') { openNewMark(); renderChat(); go(); }
   else { location.hash = '#/crew'; setTimeout(go, 80); }
 }
 window.addEventListener('storage', e => { if (S.me && e.key === chatSeenKey()) renderChatAlerts(); });
@@ -1932,15 +1963,16 @@ function mentionId(word) {
 const myMentionId = () => (isGM() ? 'gm' : mine());
 function mentionsMe(m) {
   if (!m || !m.body || chatFromMe(m)) return false;
-  for (const x of String(m.body).matchAll(mentionRegex())) { const id = mentionId(x[1]); if (id === 'everyone' || id === myMentionId()) return true; }
+  const all = chatPrefs().everyone;
+  for (const x of String(m.body).matchAll(mentionRegex())) { const id = mentionId(x[1]); if ((all && id === 'everyone') || id === myMentionId()) return true; }
   return false;
 }
 function chatBodyHTML(body) {
-  const t = String(body || ''), me = myMentionId();
+  const t = String(body || ''), me = myMentionId(), all = chatPrefs().everyone;
   let out = '', last = 0;
   for (const x of t.matchAll(mentionRegex())) {
     const id = mentionId(x[1]);
-    out += esc(t.slice(last, x.index)) + `<span class="mn${id === me || id === 'everyone' ? ' mn-me' : ''}">@${esc(x[1])}</span>`;
+    out += esc(t.slice(last, x.index)) + `<span class="mn${id === me || (all && id === 'everyone') ? ' mn-me' : ''}">@${esc(x[1])}</span>`;
     last = x.index + x[0].length;
   }
   return out + esc(t.slice(last));
@@ -1993,6 +2025,49 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('pointerdown', e => { if (e.target.closest('.mn-opt')) e.preventDefault(); });   // keep the caret in the box
 document.addEventListener('focusout', e => { if (e.target.id === 'chat-input') setTimeout(() => { if (document.activeElement !== e.target) mentionClose(); }, 120); });
+
+// Chat alert settings, per login and per device (the gear on the chat panel).
+const GEAR_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
+const CHAT_PREFS = [
+  ['ding', 'Ding when I’m mentioned', 'A soft two-note sound when someone @mentions you.'],
+  ['pops', 'Pop-ups for new messages', 'Cards in the corner when you’re not looking at the chat. The red badge still counts.'],
+  ['everyone', 'Count @everyone as a mention', 'Off: @everyone messages alert you like any other message.'],
+];
+const chatPrefsKey = () => 'debt.chatPrefs.' + (isGM() ? 'gm' : (mine() || 'none'));
+function chatPrefs() { return { ding: true, pops: true, everyone: true, ...lsJSON(chatPrefsKey(), {}) }; }
+function setChatPref(k, v) { lsSet(chatPrefsKey(), JSON.stringify({ ...chatPrefs(), [k]: v })); }
+function chatPrefsHTML() {
+  const p = chatPrefs();
+  return `
+    <div class="cs-pop" role="dialog" aria-label="Chat alerts">
+      ${CHAT_PREFS.map(([k, label, hint]) => `
+        <label class="cs-row">
+          <span class="cs-text"><b>${label}</b><small>${hint}</small></span>
+          <span class="switch"><input type="checkbox" role="switch" data-chat-pref="${k}" ${p[k] ? 'checked' : ''} aria-checked="${p[k]}"><i></i></span>
+        </label>`).join('')}
+      <p class="cs-note">Saved on this device, just for you.</p>
+    </div>`;
+}
+function toggleChatPrefs(open) {
+  S.chatPrefsOpen = open;
+  const panel = $('.chat-panel');
+  if (!panel) return;
+  const old = panel.querySelector('.cs-pop');
+  if (old) old.remove();
+  if (open) panel.querySelector('h2').insertAdjacentHTML('afterend', chatPrefsHTML());
+  const b = panel.querySelector('.cs-btn');
+  if (b) b.setAttribute('aria-expanded', open);
+}
+document.addEventListener('change', e => {
+  const k = e.target.dataset && e.target.dataset.chatPref;
+  if (!k) return;
+  setChatPref(k, e.target.checked);
+  e.target.setAttribute('aria-checked', e.target.checked);
+  if (k === 'ding' && e.target.checked) dingMention();   // a sample, so you know what it sounds like
+  renderChat(); renderChatAlerts();
+});
+document.addEventListener('pointerdown', e => { if (S.chatPrefsOpen && !e.target.closest('.cs-pop, .cs-btn')) toggleChatPrefs(false); });
+document.addEventListener('keydown', e => { if (S.chatPrefsOpen && e.key === 'Escape') toggleChatPrefs(false); });
 
 // A short, quiet two-note ding when someone mentions you.
 let dingCtx = null;
@@ -5119,6 +5194,7 @@ document.addEventListener('submit', async e => {
         : await api('chat_send', { p_body: body, p_private: priv, p_to: to });
       if (img) { CHAT_IMG.set(m.id, img.data); S.chatImg = null; renderChatAtt(); }
       S.chatDraft = ''; $('#chat-input').value = '';
+      S.newMark = null;
       if (!S.chat.some(x => x.id === m.id)) S.chat.push(m);
       renderChat(true); ping();
     } catch (err) { if (img) { img.busy = false; renderChatAtt(); } fail(err); }
@@ -5306,6 +5382,7 @@ document.addEventListener('click', async e => {
       catch (err) { fail(err); }
       break;
     }
+    case 'chat-prefs': toggleChatPrefs(!S.chatPrefsOpen); break;
     case 'chat-react': toggleReact(+el.dataset.id, el.dataset.e); break;
     case 'react-pick': if (S.rxPick === +el.dataset.id) closeReactPick(); else openReactPick(el); break;
     case 'chat-attach': $('#file-chat').click(); break;
@@ -5628,13 +5705,39 @@ window.addEventListener('hashchange', () => {
   if (S.route.view === 'shop' && prev.view !== 'shop') fetchShop();
   if (S.logOpen && window.matchMedia('(max-width: 1100px)').matches) S.logOpen = false;
   if (!S.ready) return;
+  if (S.route.view !== 'crew') S.newMark = null;
+  else if (prev.view !== 'crew' && !document.hidden) openNewMark();
   renderNav(); renderMain(); renderLog();
   if (chatInView()) { markChatSeen(); clearChatPops(); }
 });
 
+// While the first load runs, show the page's shape in grey (built from the real
+// layout classes, so it lines up and follows the same phone layout).
+function appSkeletonHTML() {
+  return `
+    <div class="skel" aria-busy="true" aria-label="Loading the crew">
+      <header class="top"><span class="brand">DEBT</span><i class="skel-b" style="width:140px;height:28px;border-radius:14px"></i>
+        <span class="skel-grow"></span><i class="skel-b" style="width:96px;height:28px;border-radius:14px"></i><i class="skel-b" style="width:120px;height:28px"></i>
+        <i class="skel-b skel-row"></i><i class="skel-b skel-row"></i></header>
+      <div class="layout">
+        <nav class="rail">${'<i class="skel-b skel-ic"></i>'.repeat(3)}</nav>
+        <main class="main"><div class="wrap">
+          <div class="grid"><div class="panel s7 skel-b skel-p skel-top"></div><div class="panel s5 skel-b skel-p skel-top"></div></div>
+          <i class="skel-b skel-title"></i>
+          <div class="cards">${'<div class="panel skel-b skel-p" style="height:250px"></div>'.repeat(3)}</div>
+        </div></main>
+        <aside class="log skel-log"><i class="skel-b" style="height:24px;width:55%"></i><i class="skel-b" style="height:96px"></i><i class="skel-b" style="height:130px"></i><i class="skel-b" style="height:130px"></i></aside>
+      </div>
+    </div>`;
+}
+function loginSkeletonHTML() {
+  return `<div class="skel-b skel-gm"></div><div class="login-divider"><span>or play as</span></div>
+    <div class="crew-grid">${'<div class="skel-b skel-tile"></div>'.repeat(4)}</div>`;
+}
+
 function boot() {
   S.route = parseRoute();
-  app.innerHTML = '<div class="gate"><p class="dim">Loading the crew…</p></div>';
+  app.innerHTML = appSkeletonHTML();
   connectRealtime();
   sync();
   startPolling();
