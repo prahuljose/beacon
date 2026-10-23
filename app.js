@@ -287,6 +287,8 @@ const ERRORS = {
   too_big: 'That is too big to save. Try a smaller picture.',
   too_short: 'Use at least 4 characters.',
   not_found: 'That no longer exists. It may have been deleted.',
+  bad_image: 'That picture couldn’t be sent. Try a smaller one.',
+  bad_emoji: 'That reaction isn’t available.',
   empty: 'Type something first.',
   pick_player: 'Pick who the private message is for.',
   slow_down: 'Slow down: up to 5 messages every 10 seconds (20 a minute).',
@@ -811,6 +813,11 @@ async function sync() {
       S.chat = S.chat.filter(m => !gone.has(m.id));
       if (S.chat.length !== before) { chatChanged = true; dropChatPops(gone); }
     }
+    // Reactions changed on messages we already have.
+    for (const u of r.chat_react || []) {
+      const m = S.chat.find(x => x.id === u.id);
+      if (m && JSON.stringify(m.reactions || {}) !== JSON.stringify(u.reactions || {})) { m.reactions = u.reactions || {}; chatChanged = true; }
+    }
     if (S.chat.length > 200) S.chat = S.chat.slice(-200);
 
     // Live scenes: new ones pop open for everyone.
@@ -1332,7 +1339,10 @@ function renderApp() {
     <button class="log-fab" id="log-fab" data-act="log-toggle" aria-label="Open dice">${die(22)}<span id="fab-last"></span></button>
     <input type="file" id="file-portrait" accept="image/*" hidden>
     <input type="file" id="file-import" accept="application/json,.json" hidden>
-    <input type="file" id="file-scene" accept="image/*" hidden>`;
+    <input type="file" id="file-scene" accept="image/*" hidden>
+    <input type="file" id="file-chat" accept="image/*" hidden>
+    <div class="rx-pick" id="rx-pick" role="menu" aria-label="Pick a reaction" hidden></div>
+    <div class="chat-lb" id="chat-lb" data-act="chat-lb-close" hidden></div>`;
   renderNav();
   renderClock();
   renderMusic();
@@ -1638,10 +1648,15 @@ function crewHTML() {
           <h2>Chat</h2>
           <div class="chat-list" id="chat-list"></div>
           <form class="chat-form" id="chat-form">
+            <div class="chat-att" id="chat-att" ${S.chatImg ? '' : 'hidden'}>${chatAttHTML()}</div>
+            <div class="mn-list" id="mn-list" role="listbox" aria-label="Mention someone" hidden></div>
             ${isGM()
               ? `<select id="chat-to" aria-label="Send to"><option value="">To everyone</option>${orderedSheets().map(r => `<option value="${r.id}" ${S.chatTo === r.id ? 'selected' : ''}>Private to ${esc(r.data.name)}</option>`).join('')}</select>`
               : `<button type="button" class="btn sm chat-priv ${S.chatPrivate ? 'on' : ''}" data-act="chat-priv" aria-pressed="${S.chatPrivate}" title="Only the GM sees it">${EYE_OFF_SVG} GM only</button>`}
-            <input id="chat-input" data-fk="chat-input" placeholder="${chatPlaceholder()}" autocomplete="off" maxlength="1000" value="${esc(S.chatDraft)}" aria-label="Chat message">
+            <span class="chat-inp">
+              <input id="chat-input" data-fk="chat-input" placeholder="${chatPlaceholder()}" autocomplete="off" maxlength="1000" value="${esc(S.chatDraft)}" aria-label="Chat message">
+              <button type="button" class="chat-pic" data-act="chat-attach" title="Add a picture (or paste / drop one)" aria-label="Add a picture">${PIC_SVG}</button>
+            </span>
             <button class="btn brass" type="submit">Send</button>
           </form>
         </section>
@@ -1683,21 +1698,26 @@ function renderChat(force) {
       tag = `<span class="tag private">${EYE_OFF_SVG} ${tag}</span>`;
       if (isGM() && m.sheet_id && !fromMe) tag += ` <button class="btn sm ghost chat-reply" data-act="chat-reply" data-id="${m.sheet_id}">Reply privately</button>`;
     }
+    const rxBtn = `<button type="button" class="chat-rx" data-act="react-pick" data-id="${m.id}" title="React" aria-label="React to this message">${SMILE_SVG}</button>`;
     if (m.kind === 'shop') return `
       <div class="chat-msg shop-line">
         ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
-        <div class="chat-main"><span class="sh-bag" aria-hidden="true">🛒</span> <b style="color:${esc(color)}">${esc(m.who)}</b> ${esc(m.body)} <span class="chat-time">${relTime(m.created_at)}</span></div>
+        <div class="chat-main"><span class="sh-bag" aria-hidden="true">🛒</span> <b style="color:${esc(color)}">${esc(m.who)}</b> ${esc(m.body)} <span class="chat-time">${relTime(m.created_at)}</span>${reactsHTML(m)}</div>
+        ${rxBtn}
         ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete shop message">${TRASH_SVG}</button>` : ''}
       </div>`;
     return `
-      <div class="chat-msg ${m.private ? 'private' : ''}">
+      <div class="chat-msg ${m.private ? 'private' : ''} ${mentionsMe(m) ? 'ment' : ''}">
         ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
         <div class="chat-main"><b style="color:${esc(color)}">${esc(m.who)}</b> <span class="chat-time">${relTime(m.created_at)}</span> ${tag}
-          <div class="chat-body">${esc(m.body)}</div></div>
+          ${m.body ? `<div class="chat-body">${chatBodyHTML(m.body)}</div>` : ''}${m.image ? chatImgHTML(m) : ''}${reactsHTML(m)}</div>
+        ${rxBtn}
         ${isGM() ? `<button type="button" class="chat-del" data-act="chat-del" data-id="${m.id}" title="Delete this message for everyone" aria-label="Delete message from ${esc(m.who)}">${TRASH_SVG}</button>` : ''}
       </div>`;
   }).join('') : '<p class="small dim" style="margin:auto">No messages yet.</p>';
   if (nearBottom) list.scrollTop = list.scrollHeight;
+  observeChatImgs(list);
+  if (MN.open) renderMentionList();   // the page may have been redrawn under an open name list
 }
 
 // ── Chat alerts: unread badge on Crew, pop-up cards, tab title ─────────────
@@ -1733,12 +1753,13 @@ function chatArrived(list) {
     groups.get(k).push(m);
   }
   for (const msgs of groups.values()) chatPop(msgs);
+  if (list.some(m => m.id > chatSeen() && mentionsMe(m))) dingMention();
   renderChatAlerts();
 }
 
 function renderChatAlerts() {
   if (!S.me) return setTabAlert(0);
-  const un = unreadChat(), n = un.length, priv = un.some(m => m.private);
+  const un = unreadChat(), n = un.length, priv = un.some(m => m.private), ment = un.some(mentionsMe);
   const link = document.querySelector('#rail a[href="#/crew"]');
   if (link) {
     let b = link.querySelector('.nav-badge');
@@ -1747,8 +1768,9 @@ function renderChatAlerts() {
       const label = n > 9 ? '9+' : String(n);
       if (!b) { b = document.createElement('span'); b.className = 'nav-badge rail-b'; link.appendChild(b); }
       if (b.textContent !== label) { b.textContent = label; b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
-      b.classList.toggle('priv', priv);
-      b.title = `${n} unread message${n === 1 ? '' : 's'}${priv ? ', including a private one' : ''}`;
+      b.classList.toggle('priv', priv && !ment);
+      b.classList.toggle('ment', ment);
+      b.title = `${n} unread message${n === 1 ? '' : 's'}${ment ? ', and someone mentioned you' : priv ? ', including a private one' : ''}`;
     }
   }
   setTabAlert(n);
@@ -1803,7 +1825,7 @@ function chatPop(msgs) {
     host.prepend(card);
     fillPop(card, false);
   }
-  armPop(card, 6500);
+  armPop(card, card.classList.contains('ment') ? 12000 : 6500);
   renderPopMore();
 }
 function fillPop(card, bump) {
@@ -1811,12 +1833,14 @@ function fillPop(card, bump) {
   if (!msgs.length) { card.remove(); return; }
   const m = msgs[msgs.length - 1], n = msgs.length;
   const rec = m.sheet_id && S.sheets.get(m.sheet_id);
-  const text = String(m.body || '').replace(/\s+/g, ' ').trim();
+  const text = ((m.image ? '📷 Picture' + (m.body ? ': ' : '') : '') + String(m.body || '')).replace(/\s+/g, ' ').trim();
+  const ment = msgs.some(mentionsMe);
+  card.classList.toggle('ment', ment);
   card.style.setProperty('--accent', rec ? accentOf(rec) : GM_COLOR);
   card.innerHTML = `
     ${rec ? avatarHTML(rec, 'xs') : '<span class="avatar xs gm-av">GM</span>'}
     <span class="cpop-text">
-      <span class="cpop-head"><b>${esc(m.who || 'Someone')}</b>${m.private ? `<span class="cpop-priv">${EYE_OFF_SVG} Private</span>` : ''}${n > 1 ? `<span class="cpop-count">${n} new</span>` : ''}<span class="cpop-time">now</span></span>
+      <span class="cpop-head"><b>${esc(m.who || 'Someone')}</b>${ment ? '<span class="cpop-ment">@ you</span>' : ''}${m.private ? `<span class="cpop-priv">${EYE_OFF_SVG} Private</span>` : ''}${n > 1 ? `<span class="cpop-count">${n} new</span>` : ''}<span class="cpop-time">now</span></span>
       <span class="cpop-body">${esc(text.length > 140 ? text.slice(0, 140) + '…' : text)}</span>
     </span>
     <button type="button" class="cpop-x" aria-label="Dismiss">×</button>`;
@@ -1862,6 +1886,261 @@ function openChat() {
   else { location.hash = '#/crew'; setTimeout(go, 80); }
 }
 window.addEventListener('storage', e => { if (S.me && e.key === chatSeenKey()) renderChatAlerts(); });
+
+// ── Chat extras: @mentions, reactions, pictures ────────────────────────────
+// @Name (full name, or a first name no one else shares), @GM and @everyone are
+// highlighted. A message that mentions you gets a gold badge, a longer pop-up and
+// a soft ding. Reactions are a fixed six; tap one to add or take back yours.
+// Pictures are shrunk in the browser, sent with an optional caption and fetched
+// one by one as they scroll into view (the server keeps only the newest 50).
+
+const REACTS = ['👍', '❤️', '😂', '😮', '💀', '🎲'];
+const SMILE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/></svg>';
+const PIC_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>';
+
+// Mentions ------------------------------------------------------------------
+function mentionTargets() {
+  const sheets = orderedSheets().filter(r => r.data.name);
+  const first = n => n.split(/\s+/)[0];
+  const firsts = sheets.map(r => first(r.data.name).toLowerCase());
+  return [
+    { id: 'gm', label: 'GM', alias: [] },
+    { id: 'everyone', label: 'everyone', alias: [] },
+    ...sheets.map(r => {
+      const f = first(r.data.name);
+      const unique = f !== r.data.name && f.length >= 3 && firsts.filter(x => x === f.toLowerCase()).length === 1;
+      return { id: r.id, label: r.data.name, alias: unique ? [f] : [], rec: r };
+    }),
+  ];
+}
+const reEsc = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+let mentionRe = null, mentionKey = '';
+function mentionRegex() {
+  const t = mentionTargets(), key = t.map(x => x.label + '/' + x.alias.join('/')).join('|');
+  if (key !== mentionKey) {
+    const words = t.flatMap(x => [x.label, ...x.alias]).sort((a, b) => b.length - a.length).map(reEsc);
+    mentionRe = new RegExp(`@(${words.join('|')})(?![\\p{L}\\p{N}_])`, 'giu');
+    mentionKey = key;
+  }
+  return mentionRe;
+}
+function mentionId(word) {
+  const w = word.toLowerCase();
+  const t = mentionTargets().find(x => x.label.toLowerCase() === w || x.alias.some(a => a.toLowerCase() === w));
+  return t ? t.id : null;
+}
+const myMentionId = () => (isGM() ? 'gm' : mine());
+function mentionsMe(m) {
+  if (!m || !m.body || chatFromMe(m)) return false;
+  for (const x of String(m.body).matchAll(mentionRegex())) { const id = mentionId(x[1]); if (id === 'everyone' || id === myMentionId()) return true; }
+  return false;
+}
+function chatBodyHTML(body) {
+  const t = String(body || ''), me = myMentionId();
+  let out = '', last = 0;
+  for (const x of t.matchAll(mentionRegex())) {
+    const id = mentionId(x[1]);
+    out += esc(t.slice(last, x.index)) + `<span class="mn${id === me || id === 'everyone' ? ' mn-me' : ''}">@${esc(x[1])}</span>`;
+    last = x.index + x[0].length;
+  }
+  return out + esc(t.slice(last));
+}
+
+// Typing "@" offers names. Arrows/Enter/Tab pick, Esc closes.
+const MN = { open: false, items: [], i: 0, start: 0 };
+function mentionUpdate(input) {
+  const caret = input.selectionStart == null ? input.value.length : input.selectionStart;
+  const hit = input.value.slice(0, caret).match(/(^|\s)@([^\s@]{0,24})$/);
+  if (!hit) return mentionClose();
+  const q = hit[2].toLowerCase(), me = myMentionId();
+  const items = mentionTargets()
+    .filter(t => t.id !== me && (!q || t.label.toLowerCase().includes(q) || t.alias.some(a => a.toLowerCase().startsWith(q))))
+    .sort((a, b) => b.label.toLowerCase().startsWith(q) - a.label.toLowerCase().startsWith(q))
+    .slice(0, 6);
+  if (!items.length) return mentionClose();
+  MN.i = MN.open ? Math.min(MN.i, items.length - 1) : 0;
+  Object.assign(MN, { open: true, items, start: caret - hit[2].length - 1 });
+  renderMentionList();
+}
+function renderMentionList() {
+  const box = $('#mn-list');
+  if (!box) return;
+  box.hidden = !MN.open;
+  box.innerHTML = MN.open ? MN.items.map((t, i) => `
+    <button type="button" class="mn-opt ${i === MN.i ? 'on' : ''}" data-act="mn-pick" data-i="${i}" role="option" aria-selected="${i === MN.i}">
+      ${t.rec ? avatarHTML(t.rec, 'xs') : t.id === 'gm' ? '<span class="avatar xs gm-av">GM</span>' : '<span class="mn-all">@</span>'}
+      <span>${t.id === 'everyone' ? 'everyone' : esc(t.label)}</span>${t.id === 'everyone' ? '<small>whole crew</small>' : ''}
+    </button>`).join('') : '';
+}
+function mentionClose() { if (!MN.open) return; MN.open = false; renderMentionList(); }
+function mentionPick(i) {
+  const t = MN.items[i], input = $('#chat-input');
+  if (!t || !input) return mentionClose();
+  const caret = input.selectionStart == null ? input.value.length : input.selectionStart;
+  const ins = `@${t.label} `;
+  input.value = input.value.slice(0, MN.start) + ins + input.value.slice(caret);
+  const pos = MN.start + ins.length;
+  input.setSelectionRange(pos, pos);
+  S.chatDraft = input.value;
+  mentionClose();
+  input.focus();
+}
+document.addEventListener('keydown', e => {
+  if (!MN.open || e.target.id !== 'chat-input') return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); MN.i = (MN.i + (e.key === 'ArrowDown' ? 1 : -1) + MN.items.length) % MN.items.length; renderMentionList(); }
+  else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); mentionPick(MN.i); }
+  else if (e.key === 'Escape') { e.preventDefault(); mentionClose(); }
+});
+document.addEventListener('pointerdown', e => { if (e.target.closest('.mn-opt')) e.preventDefault(); });   // keep the caret in the box
+document.addEventListener('focusout', e => { if (e.target.id === 'chat-input') setTimeout(() => { if (document.activeElement !== e.target) mentionClose(); }, 120); });
+
+// A short, quiet two-note ding when someone mentions you.
+let dingCtx = null;
+function dingMention() {
+  try {
+    dingCtx = dingCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const t = dingCtx.currentTime;
+    [[880, 0], [1320, 0.11]].forEach(([f, d]) => {
+      const o = dingCtx.createOscillator(), g = dingCtx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + d);
+      g.gain.exponentialRampToValueAtTime(0.07, t + d + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.4);
+      o.connect(g).connect(dingCtx.destination);
+      o.start(t + d); o.stop(t + d + 0.45);
+    });
+  } catch { /* no audio */ }
+}
+
+// Reactions -----------------------------------------------------------------
+const reactorName = id => (id === myMentionId() ? 'You' : id === 'gm' ? 'GM' : (S.sheets.get(id) && S.sheets.get(id).data.name) || 'Someone');
+function reactsHTML(m) {
+  const r = m.reactions || {}, me = myMentionId();
+  const chips = REACTS.filter(e => (r[e] || []).length).map(e => {
+    const who = r[e], on = who.includes(me);
+    return `<button type="button" class="rx ${on ? 'on' : ''}" data-act="chat-react" data-id="${m.id}" data-e="${e}" aria-pressed="${on}" title="${esc(who.map(reactorName).join(', '))}">${e}<b>${who.length}</b></button>`;
+  }).join('');
+  return chips ? `<div class="rx-row">${chips}</div>` : '';
+}
+function openReactPick(btn) {
+  const pick = $('#rx-pick');
+  if (!pick) return;
+  S.rxPick = +btn.dataset.id;
+  pick.innerHTML = REACTS.map(e => `<button type="button" data-act="chat-react" data-id="${S.rxPick}" data-e="${e}" role="menuitem" aria-label="React ${e}">${e}</button>`).join('');
+  pick.hidden = false;
+  const r = btn.getBoundingClientRect(), w = pick.offsetWidth, h = pick.offsetHeight;
+  pick.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + 'px';
+  pick.style.top = (r.top - h - 6 < 8 ? r.bottom + 6 : r.top - h - 6) + 'px';
+}
+function closeReactPick() { const p = $('#rx-pick'); if (p) p.hidden = true; S.rxPick = null; }
+document.addEventListener('pointerdown', e => { if (S.rxPick != null && !e.target.closest('#rx-pick, .chat-rx')) closeReactPick(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeReactPick(); closeChatImg(); } });
+document.addEventListener('scroll', e => { if (S.rxPick != null && e.target.id === 'chat-list') closeReactPick(); }, true);
+// Show it straight away, then settle on what the server says.
+async function toggleReact(id, e) {
+  closeReactPick();
+  const m = S.chat.find(x => x.id === id);
+  if (!m || !REACTS.includes(e)) return;
+  const me = myMentionId(), before = m.reactions || {}, list = before[e] || [];
+  const next = { ...before, [e]: list.includes(me) ? list.filter(x => x !== me) : [...list, me] };
+  if (!next[e].length) delete next[e];
+  m.reactions = next; renderChat();
+  try { const r = await api('chat_react', { p_id: id, p_emoji: e }); m.reactions = r.reactions || {}; renderChat(); ping(); }
+  catch (err) { m.reactions = before; renderChat(); fail(err); }
+}
+
+// Pictures --------------------------------------------------------------------
+const CHAT_IMG = new Map();       // message id -> data URL (null once it's gone)
+const chatImgLoading = new Set();
+let chatImgObs = null;
+function chatImgHTML(m) {
+  const w = +m.image.w || 1, h = +m.image.h || 1, dw = Math.round(Math.min(240, w, 200 * w / h));
+  if (CHAT_IMG.has(m.id) && !CHAT_IMG.get(m.id)) return '<div class="chat-img gone">Picture no longer available</div>';
+  const src = CHAT_IMG.get(m.id);
+  return `<button type="button" class="chat-img" data-act="chat-img-open" data-id="${m.id}" style="width:${dw}px;aspect-ratio:${w} / ${h}" aria-label="Open picture">${src ? `<img src="${src}" alt="">` : ''}</button>`;
+}
+// Fetch pictures only as they come near the visible part of the chat.
+function observeChatImgs(list) {
+  if (chatImgObs) chatImgObs.disconnect();
+  const els = [...list.querySelectorAll('.chat-img:not(.gone)')].filter(el => !el.querySelector('img'));
+  if (!els.length || !('IntersectionObserver' in window)) { els.forEach(el => loadChatImg(+el.dataset.id)); return; }
+  chatImgObs = new IntersectionObserver(entries => {
+    for (const en of entries) if (en.isIntersecting) { chatImgObs.unobserve(en.target); loadChatImg(+en.target.dataset.id); }
+  }, { root: list, rootMargin: '300px 0px' });
+  els.forEach(el => chatImgObs.observe(el));
+}
+async function loadChatImg(id) {
+  if (CHAT_IMG.has(id) || chatImgLoading.has(id)) return;
+  chatImgLoading.add(id);
+  try { CHAT_IMG.set(id, (await api('chat_image', { p_id: id })) || null); }
+  catch (err) { if (err && err.code === '28P01') return fail(err); if (!isNetErr(err)) CHAT_IMG.set(id, null); }
+  finally { chatImgLoading.delete(id); }
+  if (CHAT_IMG.has(id)) renderChat();
+}
+function openChatImg(id) {
+  const src = CHAT_IMG.get(id), lb = $('#chat-lb');
+  if (!src || !lb) return;
+  lb.innerHTML = `<img src="${src}" alt=""><button type="button" class="chat-lb-x" aria-label="Close">×</button>`;
+  lb.hidden = false;
+}
+function closeChatImg() { const lb = $('#chat-lb'); if (lb && !lb.hidden) { lb.hidden = true; lb.innerHTML = ''; } }
+
+// Attaching: the picture button, pasting into the message box, or dropping on the chat.
+function chatAttHTML() {
+  const a = S.chatImg;
+  return a ? `<img src="${a.data}" alt=""><span class="small dim">${a.busy ? 'Sending…' : 'Add a caption, or just send it.'}</span>
+    <button type="button" class="chat-att-x" data-act="chat-att-x" aria-label="Remove picture" ${a.busy ? 'disabled' : ''}>×</button>` : '';
+}
+function renderChatAtt() { const box = $('#chat-att'); if (box) { box.hidden = !S.chatImg; box.innerHTML = chatAttHTML(); } }
+async function attachChatImage(file) {
+  if (!file || !/^image\//.test(file.type)) return toast('That isn’t a picture.', true);
+  try { S.chatImg = await shrinkChatImage(file); renderChatAtt(); const i = $('#chat-input'); if (i) i.focus(); }
+  catch { toast('Couldn’t use that picture. Try a different one.', true); }
+}
+const readDataURL = file => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+// At most 1600 px on the long side, as a JPEG under ~430 KB. Small GIFs go as they are.
+async function shrinkChatImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const W = img.naturalWidth, H = img.naturalHeight;
+    if (file.type === 'image/gif' && file.size < 400000) return { data: await readDataURL(file), w: W, h: H };
+    let scale = Math.min(1, 1600 / Math.max(W, H));
+    for (let tries = 0; tries < 6; tries++) {
+      const w = Math.max(1, Math.round(W * scale)), h = Math.max(1, Math.round(H * scale));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);     // transparent PNGs get a white backing, not black
+      ctx.drawImage(img, 0, 0, w, h);
+      for (const q of [0.85, 0.75, 0.65]) { const data = c.toDataURL('image/jpeg', q); if (data.length <= 580000) return { data, w, h }; }
+      scale *= 0.75;
+    }
+    throw new Error('too_big');
+  } finally { URL.revokeObjectURL(url); }
+}
+document.addEventListener('paste', e => {
+  if (!e.target.closest || !e.target.closest('#chat-form')) return;
+  const f = [...((e.clipboardData && e.clipboardData.files) || [])].find(x => /^image\//.test(x.type));
+  if (f) { e.preventDefault(); attachChatImage(f); }
+});
+document.addEventListener('dragover', e => {
+  const p = e.target.closest && e.target.closest('.chat-panel');
+  if (!p || !S.me || !e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+  e.preventDefault(); p.classList.add('drop');
+});
+document.addEventListener('dragleave', e => { const p = e.target.closest && e.target.closest('.chat-panel'); if (p && !p.contains(e.relatedTarget)) p.classList.remove('drop'); });
+document.addEventListener('drop', e => {
+  const p = e.target.closest && e.target.closest('.chat-panel');
+  if (!p) return;
+  e.preventDefault(); p.classList.remove('drop');
+  attachChatImage([...e.dataTransfer.files].find(x => /^image\//.test(x.type)));
+});
+document.addEventListener('change', e => {
+  if (e.target.id !== 'file-chat') return;
+  const f = e.target.files[0]; e.target.value = '';
+  if (f) attachChatImage(f);
+});
 
 
 // ── Shared background music ────────────────────────────────────────────────
@@ -4764,7 +5043,7 @@ document.addEventListener('input', e => {
     S.rulesNote = el.value;
     return debouncedSave('rules', () => api('gm_set_rules_note', { p_body: el.value }), 'rules-saving');
   }
-  if (el.id === 'chat-input') { S.chatDraft = el.value; return; }
+  if (el.id === 'chat-input') { S.chatDraft = el.value; mentionUpdate(el); return; }
   if (el.id === 'mr-label') { $('#mr-hint').innerHTML = mrHint(el.value); return; }
   if (el.dataset.gmColor !== undefined) {
     S.gmColor = el.value; lsSet('debt.gmcolor', el.value);
@@ -4828,16 +5107,21 @@ document.addEventListener('submit', async e => {
   const form = e.target;
   if (form.id === 'chat-form') {
     e.preventDefault();
-    const body = S.chatDraft.trim();
-    if (!body || S.chatSending) return;
+    const body = S.chatDraft.trim(), img = S.chatImg;
+    if ((!body && !img) || S.chatSending) return;
     S.chatSending = true;
+    mentionClose();
+    if (img) { img.busy = true; renderChatAtt(); }
     try {
-      const priv = isGM() ? !!S.chatTo : S.chatPrivate;
-      const m = await api('chat_send', { p_body: body, p_private: priv, p_to: isGM() ? (S.chatTo || null) : null });
+      const priv = isGM() ? !!S.chatTo : S.chatPrivate, to = isGM() ? (S.chatTo || null) : null;
+      const m = img
+        ? await api('chat_send_image', { p_image: img.data, p_w: img.w, p_h: img.h, p_body: body, p_private: priv, p_to: to })
+        : await api('chat_send', { p_body: body, p_private: priv, p_to: to });
+      if (img) { CHAT_IMG.set(m.id, img.data); S.chatImg = null; renderChatAtt(); }
       S.chatDraft = ''; $('#chat-input').value = '';
       if (!S.chat.some(x => x.id === m.id)) S.chat.push(m);
       renderChat(true); ping();
-    } catch (err) { fail(err); }
+    } catch (err) { if (img) { img.busy = false; renderChatAtt(); } fail(err); }
     finally { S.chatSending = false; }
     return;
   }
@@ -5022,6 +5306,13 @@ document.addEventListener('click', async e => {
       catch (err) { fail(err); }
       break;
     }
+    case 'chat-react': toggleReact(+el.dataset.id, el.dataset.e); break;
+    case 'react-pick': if (S.rxPick === +el.dataset.id) closeReactPick(); else openReactPick(el); break;
+    case 'chat-attach': $('#file-chat').click(); break;
+    case 'chat-att-x': S.chatImg = null; renderChatAtt(); break;
+    case 'chat-img-open': openChatImg(+el.dataset.id); break;
+    case 'chat-lb-close': closeChatImg(); break;
+    case 'mn-pick': mentionPick(+el.dataset.i); break;
     case 'chat-priv': S.chatPrivate = !S.chatPrivate; el.classList.toggle('on', S.chatPrivate); el.setAttribute('aria-pressed', S.chatPrivate); $('#chat-input').placeholder = chatPlaceholder(); break;
     case 'chat-reply': S.chatTo = el.dataset.id; { const sel = $('#chat-to'); if (sel) sel.value = S.chatTo; } $('#chat-input').placeholder = chatPlaceholder(); $('#chat-input').focus(); break;
     case 'session-add': {
