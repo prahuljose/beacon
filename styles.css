@@ -1814,3 +1814,15 @@ textarea.text-entry::placeholder { color: rgba(230,223,203,.38); }
   .skel-top { height: 260px; }
 }
 @media (prefers-reduced-motion: reduce) { .skel-b::after { animation: none; } }
+
+/* v35: combat rules. GM-hideable panels (cb-) and the GM view / player preview switch. */
+.cb-hd { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cb-hd h2 { margin-bottom: 10px; }
+.cb-hd .btn { margin-bottom: 8px; }
+.panel.cb-hid > :not(.cb-hd) { opacity: .55; }
+.cb-banner { flex-wrap: wrap; row-gap: 8px; }
+.cb-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.cb-seg button { padding: 5px 10px; border: 0; border-radius: 0; background: var(--steel); color: var(--paper); font: inherit; font-size: 12px; cursor: pointer; }
+.cb-seg button + button { border-left: 1px solid var(--line); }
+.cb-seg button.on { background: var(--brass); color: #1b1f22; }
+.cb-seg button:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }

@@ -3587,15 +3587,19 @@ function crewRulesHTML() {
 }
 
 // Combat rules, from the GM's "Crew Rules: Combat" sheet. Reference only:
-// nothing else in the app uses these numbers.
+// nothing else in the app uses these numbers. The GM can hide the Weapons and
+// Armor panels from players (crew.settings combat_weapons_visible /
+// combat_armor_visible; missing = hidden) and preview the tab as a player.
 const COMBAT_WEAPONS = [
-  ['Punch', '1d3', '—'], ['Kick', '1d3', '—'], ['Knife', '1d4+2', 'Bleed'], ['Baseball bat', '1d4+1', 'Knockdown'],
-  ['Brass knuckles', '1d4+1', '—'], ['Baton', 'None', 'Disarm'], ['Taser', '1d2+1', 'Stun'],
-  ['Pepper spray', '1d2+1', 'Blind'], ['Pistol', '1d5', '—'], ['Shotgun', '1d8+1', 'Knockdown'],
+  ['Punch', '1d3', '—'], ['Kick', '1d3', '—'], ['Brass knuckles', '1d4+2', 'Concealable'], ['Baseball bat', '1d4+1', 'Knockdown'],
+  ['Knife', '1d4+2', 'Bleed'], ['Baton', 'None', 'Disarm'], ['Taser', '2', 'Stun'], ['Pepper spray', '1d2+1', 'Blind'],
+  ['Pistol', '1d8', '—'], ['Compact SMG', '2d4+2', '—'], ['Shotgun', '1d10+1', 'Knockdown'],
 ];
 const COMBAT_ARMOR = [
-  ['Thick coat', 1, '2 hits'], ['Work boots', 1, '2 hits'], ['Motorcycle helmet', 1, '2 hits'],
-  ['Kevlar vest', 2, '4 hits'], ['Ballistic plate', 3, '6 hits'],
+  ['Thick coat', 1, '2 hits', '—'], ['Leather jacket', 1, '3 hits', '—'], ['Kevlar vest', 2, '4 hits', '—'],
+  ['Ballistic plate', 2, '6 hits', '—'], ['Hard hat', 1, '1 hit', '—'], ['Motorcycle helmet', 1, '3 hits', '+2 to resist Stunned'],
+  ['Work boots', 1, '2 hits', '—'], ['Steel-toe boots', 1, '3 hits', '+2 to resist Knockdown'], ['Work gloves', 1, '1 hit', '+2 to resist Disarm'],
+  ['Safety goggles', 1, '1 hit', '+2 to resist Blinded'], ['Earmuffs', 1, '1 hit', '+2 to resist Deafened'],
 ];
 const COMBAT_STATUS = [
   ['Bleed', 'Lose 2 HP at the start of each turn until bandaged. Bandaging takes 1 action, and anyone can do it.', 'Stopped by: bandages or healing'],
@@ -3609,18 +3613,37 @@ const COMBAT_STATUS = [
   ['Blinded', 'Can’t see for one round. −2 to all rolls.', 'Resist: 2d6 + Wits or Composure'],
 ];
 const COMBAT_ACTIONS = [
-  ['Attack', 'Hit someone (only one attack per turn)'],
-  ['Move', 'Cross a room, reach cover, climb a ladder'],
-  ['Help', 'Bandage someone, use painkillers or adrenaline, shove, pick a lock'],
-  ['Stand or recover', 'Stand up, pick up a dropped weapon'],
+  ['Attack', 'Hit someone. Both of your actions can be attacks.'],
+  ['Assist', 'Help someone else’s roll (see Advantage)'],
+  ['Move', 'Counts as 1 action: cross a room, reach cover, climb a ladder'],
+  ['Other', 'Bandage someone, use painkillers or adrenaline, shove, pick a lock'],
+  ['Recover', 'Stand up, pick up a dropped weapon'],
 ];
+const COMBAT_HELP = [['1', '+1'], ['2', '+2']];
+const COMBAT_PANELS = { wpn: 'combat_weapons_visible', arm: 'combat_armor_visible' };
 
 function combatRulesHTML() {
   const gm = isGM(), on = !!S.settings.combat_visible;
+  const asPlayer = !gm || !!S.combatPreview;
+  const shown = k => !!S.settings[COMBAT_PANELS[k]];
+  // A panel the GM can hide: dimmed with a tag for the GM, left out for players.
+  const hideable = (k, title, body) => {
+    if (asPlayer && !shown(k)) return '';
+    const hid = gm && !asPlayer && !shown(k);
+    return `
+          <section class="panel ${hid ? 'cb-hid' : ''}">
+            <div class="cb-hd"><h2>${title}${hid ? ' <small class="hidden-tag">hidden from players</small>' : ''}</h2>
+              ${gm && !asPlayer ? `<button class="btn sm ${shown(k) ? '' : 'brass'}" data-act="combat-panel" data-k="${k}">${shown(k) ? 'Hide from players' : 'Show to players'}</button>` : ''}</div>
+            ${body}
+          </section>`;
+  };
   return `
-      ${gm ? `<div class="banner ${on ? '' : 'lock'}">
+      ${gm ? `<div class="banner cb-banner ${on ? '' : 'lock'}">
         ${on ? 'Players can see this tab.' : `${EYE_OFF_SVG} Hidden from players. Only you can see it.`}
         <span class="spacer"></span>
+        <span class="cb-seg" role="group" aria-label="View as">
+          <button class="${asPlayer ? '' : 'on'}" data-act="combat-preview" data-v="0" aria-pressed="${!asPlayer}">GM view</button><button class="${asPlayer ? 'on' : ''}" data-act="combat-preview" data-v="1" aria-pressed="${asPlayer}">Player preview</button>
+        </span>
         <button class="btn sm ${on ? '' : 'brass'}" data-act="combat-show" data-v="${on ? 0 : 1}">${on ? 'Hide from players' : 'Show to players'}</button>
       </div>` : ''}
       <div class="grid combat">
@@ -3628,6 +3651,8 @@ function combatRulesHTML() {
           <section class="panel">
             <h2>Turns</h2>
             <p><span class="hl">Order.</span> At the start of a fight, everyone rolls 2d6 + Dexterity or Wits. Highest goes first, then down the order, and it stays the same every round. Ties go to the higher modifier, then to the players.</p>
+            <p><span class="hl">Surprise.</span> If you ambush someone, roll twice and take the highest.</p>
+            <p><span class="hl">Cover.</span> Cover adds +2 to your armor.</p>
             <p><span class="hl">Your turn.</span> You get 2 actions. You can spend them on anything, and you can do the same thing twice.</p>
             <table class="rtable"><thead><tr><th>Action</th><th>Examples</th></tr></thead>
               <tbody>${COMBAT_ACTIONS.map(a => `<tr><td>${a[0]}</td><td>${a[1]}</td></tr>`).join('')}</tbody></table>
@@ -3645,28 +3670,34 @@ function combatRulesHTML() {
             <p>Three successes and you stabilize. You’re unconscious but alive.</p>
             <p class="warn">Three fails and you’re dead.</p>
           </section>
+          <section class="panel">
+            <h2>Advantage</h2>
+            <p>When someone helps you, you roll with Advantage.</p>
+            <table class="rtable"><thead><tr><th>Helpers</th><th>Bonus to your roll</th></tr></thead>
+              <tbody>${COMBAT_HELP.map(h => `<tr><td>${h[0]}</td><td>${h[1]}</td></tr>`).join('')}</tbody></table>
+            <p style="margin-top:10px"><span class="hl">Assist.</span> A helper spends an action on the same task, and it has to make sense: holding the ladder, covering the door, steadying the drill.</p>
+            <p>The bonus applies to one roll. Two helpers is the most that counts.</p>
+            <p>It stacks with Grit, Specialty and Wear rerolls.</p>
+          </section>
         </div>
         <div class="s6" style="display:grid;gap:16px;align-content:start">
           <section class="panel">
             <h2>Attacking</h2>
             <p>When you attack, roll 2d6 plus a stat.</p>
-            <p><span class="hl">Dexterity</span> for aimed weapons: pistol, shotgun, taser, pepper spray, knife.</p>
-            <p><span class="hl">Strength</span> for swung weapons and fists: punch, kick, bat, brass knuckles, baton.</p>
+            <p><span class="hl">Dexterity</span> for aimed weapons: pistol, compact SMG, shotgun, taser, pepper spray, knife.</p>
+            <p><span class="hl">Strength</span> for swung weapons: bat, brass knuckles, baton.</p>
+            <p><span class="hl">Dexterity or Strength</span> for punch and kick, your choice.</p>
             <h3>When you hit, choose one</h3>
             <p><span class="hl">Damage.</span> Roll damage. They take it. Armor reduces it.</p>
             <p><span class="hl">Effect.</span> They resist. If they fail, they get the effect. No damage.</p>
           </section>
-          <section class="panel">
-            <h2>Weapons</h2>
+          ${hideable('wpn', 'Weapons', `
             <table class="rtable"><thead><tr><th>Weapon</th><th>Damage</th><th>Effect</th></tr></thead>
-              <tbody>${COMBAT_WEAPONS.map(w => `<tr><td>${w[0]}</td><td>${w[1]}</td><td>${w[2]}</td></tr>`).join('')}</tbody></table>
-          </section>
-          <section class="panel">
-            <h2>Armor</h2>
-            <table class="rtable"><thead><tr><th>Armor</th><th>Reduces</th><th>Breaks after</th></tr></thead>
-              <tbody>${COMBAT_ARMOR.map(a => `<tr><td>${a[0]}</td><td>${a[1]}</td><td>${a[2]}</td></tr>`).join('')}</tbody></table>
-            <p class="dim small" style="margin-top:10px">You can wear multiple pieces.</p>
-          </section>
+              <tbody>${COMBAT_WEAPONS.map(w => `<tr><td>${w[0]}</td><td>${w[1]}</td><td>${w[2]}</td></tr>`).join('')}</tbody></table>`)}
+          ${hideable('arm', 'Armor', `
+            <table class="rtable"><thead><tr><th>Armor</th><th>Reduces</th><th>Breaks after</th><th>Special</th></tr></thead>
+              <tbody>${COMBAT_ARMOR.map(a => `<tr><td>${a[0]}</td><td>${a[1]}</td><td>${a[2]}</td><td>${a[3]}</td></tr>`).join('')}</tbody></table>
+            <p class="dim small" style="margin-top:10px">Wear up to 3 pieces. When a piece runs out of durability, it drops to the floor.</p>`)}
         </div>
         <section class="panel s12">
           <h2>Status effects</h2>
@@ -5382,6 +5413,15 @@ document.addEventListener('click', async e => {
       catch (err) { fail(err); }
       break;
     }
+    case 'combat-panel': {
+      const key = COMBAT_PANELS[el.dataset.k];
+      if (!key || !isGM()) break;
+      el.disabled = true;
+      try { S.settings = await api('gm_set_settings', { p_settings: { [key]: !S.settings[key] } }); ping(); renderMain(); }
+      catch (err) { el.disabled = false; fail(err); }
+      break;
+    }
+    case 'combat-preview': S.combatPreview = el.dataset.v === '1'; renderMain(); break;
     case 'chat-prefs': toggleChatPrefs(!S.chatPrefsOpen); break;
     case 'chat-react': toggleReact(+el.dataset.id, el.dataset.e); break;
     case 'react-pick': if (S.rxPick === +el.dataset.id) closeReactPick(); else openReactPick(el); break;
