@@ -20,6 +20,11 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 34 (2026-11-01): presence rate limit fix
+- [x] Supabase logged `ClientPresenceRateLimitReached` (a tab sending presence too often gets its channel closed). Real cases: the GM logging out and straight back in (about six updates in five seconds), switching tabs twice in a few seconds (each switch sent ~3), and jukebox changes while switching tabs. Causes: every 10 s music poll re-sent presence even when nothing changed, a tab return sent it twice, the watchdog re-sent while an update was still on its way, nothing collapsed bursts.
+- [x] All presence now goes through one queue (`queuePresence`): sent only if it differs from the last update, at most once every 3 s (`PRESENCE_GAP`), with the latest state; a new or rejoined channel always sends once; the watchdog only re-sends a missing/stale entry after 10 s of quiet; logging out resets the queue.
+- Tested locally on the dev channel: the same burst (4 quick calls + 12 tab switches in 6 s) closed the old code's channel (Supabase logged the error) while the new code sent 2 updates 3 s apart and stayed connected; away/online, music volume, log-out/log-in burst (1 update), watchdog restore (0.5 s) and full reconnect (2.8 s) all reach the GM; no realtime or console errors. Deployed `?v=36`.
+
 ## Round 33 (2026-11-01): new combat rules
 - [x] Combat rules tab replaced with the GM's new "Crew Rules: Combat" sheet: Turns (adds Surprise, Cover; actions Attack/Assist/Move/Other/Recover, both actions can be attacks), new Advantage panel (1 helper +1, 2 helpers +2, stacks with Grit/Specialty/Wear), Attacking (compact SMG; punch and kick use Dexterity or Strength), Weapons (11, incl. Compact SMG 2d4+2, Pistol 1d8, Shotgun 1d10+1, Taser 2, Brass knuckles 1d4+2 Concealable), Armor (11 pieces with a Special column; wear up to 3, broken pieces drop), HP/dropping to 0 and Status effects unchanged.
 - [x] GM can hide the Weapons and Armor panels from players separately (`crew.settings.combat_weapons_visible` / `combat_armor_visible`, missing = hidden; dimmed with a "hidden from players" tag in the GM view), plus a GM view / Player preview switch on the tab. The whole tab still follows `combat_visible` (currently hidden from players).

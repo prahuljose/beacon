@@ -385,7 +385,7 @@ function connectRealtime() {
     channel.subscribe(status => {
       if (ch !== channel) return;
       S.rtLive = status === 'SUBSCRIBED';
-      if (S.rtLive) { if (S.me) trackPresence(); else trackViewer(); }
+      if (S.rtLive) { if (S.me) trackPresence(true); else trackViewer(true); }
       renderOnline();
     });
   } catch { channel = null; /* polling still works */ }
@@ -400,9 +400,10 @@ setInterval(() => {
   if (live) {
     rtDownSince = 0;
     const meta = ((S.presence || {})[TAB_ID] || [])[0];
+    const quiet = Date.now() - PRES.at > 10000;   // our last update may still be on its way
     if (S.me) {
-      if (!meta || meta.role !== S.me.role || (meta.sheet_id || null) !== (S.me.sheet_id || null)) trackPresence();
-    } else if (!meta && $('.login')) trackViewer();
+      if (quiet && (!meta || meta.role !== S.me.role || (meta.sheet_id || null) !== (S.me.sheet_id || null))) trackPresence(true);
+    } else if (quiet && !meta && $('.login')) trackViewer(true);
   } else if (!document.hidden) {
     rtDownSince = rtDownSince || Date.now();
     if (Date.now() - rtDownSince > 12000) {
@@ -419,17 +420,37 @@ setInterval(() => {
 // foreground. Closing the tab removes it; a dropped connection times out.
 
 const TAB_ID = Math.random().toString(36).slice(2, 12);
-function trackPresence() {
-  if (!channel || !S.rtLive || !S.me) return;
-  try { channel.track({ role: S.me.role, sheet_id: S.me.sheet_id || null, away: document.hidden, music: musicPresence() }); } catch { /* not joined yet */ }
+// Supabase closes a tab's channel if it sends presence too often
+// (ClientPresenceRateLimitReached), e.g. a quick log out and back in, or flicking
+// between tabs. So every update goes through one queue: it's sent only if it
+// differs from what we last sent, and at most once per PRESENCE_GAP; anything
+// asked for in between collapses into one update with the latest state.
+const PRESENCE_GAP = 3000;
+const PRES = { sent: '', at: 0, t: null, build: null, force: false };
+function queuePresence(build, force) {
+  PRES.build = build;
+  PRES.force = PRES.force || !!force;
+  if (PRES.t) return;
+  PRES.t = setTimeout(() => {
+    PRES.t = null;
+    const p = PRES.build && PRES.build(), force2 = PRES.force;
+    PRES.force = false;
+    if (!p || !channel || !S.rtLive) return;
+    const key = JSON.stringify(p);
+    if (key === PRES.sent && !force2) return;   // nothing new to tell anyone
+    PRES.sent = key; PRES.at = Date.now();
+    try { channel.track(p); } catch { PRES.sent = ''; /* not joined yet */ }
+  }, Math.max(0, PRES.at + PRESENCE_GAP - Date.now()));
 }
+const memberPresence = () => (S.me ? { role: S.me.role, sheet_id: S.me.sheet_id || null, away: document.hidden, music: musicPresence() } : null);
+function trackPresence(force) { if (S.me) queuePresence(memberPresence, force); }
 // The login page has to track something to be sent presence at all. A viewer
 // has no role or character, so presenceMap() skips it and no one sees it.
-function trackViewer() {
-  if (!channel || !S.rtLive || S.me || !$('.login')) return;
-  try { channel.track({ role: 'viewer' }); } catch { /* ignore */ }
+function trackViewer(force) { if (!S.me && $('.login')) queuePresence(() => (!S.me && $('.login') ? { role: 'viewer' } : null), force); }
+function untrackPresence() {
+  clearTimeout(PRES.t); PRES.t = null; PRES.sent = ''; PRES.at = Date.now();
+  try { if (channel) channel.untrack(); } catch { /* ignore */ }
 }
-function untrackPresence() { try { if (channel) channel.untrack(); } catch { /* ignore */ } }
 
 // id ('gm' or a sheet id) -> 'online' | 'away'. Any foreground tab wins.
 function presenceMap() {
