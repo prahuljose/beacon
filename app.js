@@ -72,7 +72,19 @@ const VAULT_MID   = 'KLMNO'.split('');
 const VAULT_RIGHT = 'PQRSTUVWXY'.split('');
 const VAULT_STATES = { '': 'Unmarked', open: 'Open', progress: 'In progress', complete: 'Complete' };
 
-const blankGear = (kind = 'item') => ({ name: '', kind, dice: 1, die: 6, stat: 'strength', bonus: 0, effect: '' });
+const blankGear = (kind = 'item') => ({ name: '', kind, qty: 1, dice: 1, die: 6, stat: 'strength', bonus: 0, effect: '' });
+// Items (not weapons) carry a count. Older shop purchases kept it in the name
+// ("Padlock ×3"): read those as a name and a count.
+function gearQty(g, raw) {
+  if (g.kind === 'weapon') return g;
+  if (g.oid != null && (!isObj(raw) || raw.qty == null)) {
+    const m = /^(.*\S)\s*×\s*(\d{1,3})$/.exec(g.name || '');
+    if (m && +m[2] > 0) { g.name = m[1]; g.qty = +m[2]; }
+  }
+  const q = g.qty == null || g.qty === '' ? 1 : Math.round(+g.qty);
+  g.qty = Number.isFinite(q) ? Math.max(0, Math.min(999, q)) : 1;
+  return g;
+}
 const blankKit = (kind = 'apparel') => ({ name: '', kind, durability: 0, reduction: 0 });
 
 function blankSheet(name) {
@@ -142,7 +154,7 @@ function normalize(raw) {
   }
   const out = withDefaults(blankSheet(), d);
   // Gear used to be plain strings; now each slot is an item or a weapon.
-  out.gear = out.gear.map(g => (isObj(g) ? { ...blankGear(), ...g } : { ...blankGear(), name: String(g ?? '') }));
+  out.gear = out.gear.map(g => gearQty(isObj(g) ? { ...blankGear(), ...g } : { ...blankGear(), name: String(g ?? '') }, g));
   out.kit = out.kit.map(k => (isObj(k) ? { ...blankKit(), ...k } : { ...blankKit(), name: String(k ?? '') }));
   return out;
 }
@@ -3293,6 +3305,7 @@ function gearRow(d, g, i) {
           <option value="weapon" ${weapon ? 'selected' : ''}>Weapon</option>
         </select>
         <input data-bind="gear.${i}.name" value="${esc(g.name)}" placeholder="${weapon ? 'Weapon name' : 'Item'}" aria-label="Gear slot ${i + 1}">
+        ${weapon ? '' : `<label class="gear-qty" title="How many"><span aria-hidden="true">×</span><input type="number" inputmode="numeric" min="0" max="999" step="1" data-type="qty" data-bind="gear.${i}.qty" value="${esc(g.qty ?? 1)}" aria-label="How many: ${esc(g.name || 'slot ' + (i + 1))}"></label>`}
         ${weapon ? `<button class="roll-btn" data-act="roll-weapon" data-i="${i}" title="Roll damage: ${g.dice || 1}d${g.die || 6} ${signed(m)}" aria-label="Roll ${esc(g.name || 'weapon')} damage">${DIE_SVG}</button>` : ''}
         <button class="icon-btn" data-act="gear-del" data-i="${i}" aria-label="Remove slot ${i + 1}">×</button>
       </div>
@@ -5202,6 +5215,7 @@ function currentSheet(el) {
 }
 function readValue(el) {
   if (el.type === 'checkbox') return el.checked;
+  if (el.dataset.type === 'qty') { const n = Math.round(Number(el.value)); return el.value === '' || !Number.isFinite(n) ? 1 : Math.max(0, Math.min(999, n)); }
   if (el.dataset.type === 'num') return el.value === '' ? null : Number(el.value);
   return el.value;
 }
