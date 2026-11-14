@@ -20,6 +20,14 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 36 (2026-11-14): Vault danger alarm
+- [x] Uncovering a DANGER box (unmarked → any state) plays a 3.2 s alarm for everyone looking at the Vault: the box flashes red with three outline rings, the Vault's edge pulses red and a banner slides over the top ("DANGER: C3 opened by Lilth"; "uncovered" for other states). The banner is an overlay (`.va-clip`), so the grid never moves. Three short buzzes follow the dice sound setting. Reduced motion: banner only.
+- [x] Client only, no DB change. `dangerUncovered(prev, b)` fires from sync (other people) and from the `vault_set` reply (the clicker), never on first load, on show-after-hidden, or for DANGER set on an already-marked box. State lives in `S.vaultAlarm`; redraws resume the animation with a negative delay (`--va-d`). Minimised window / GM on another page: a toast instead.
+- [x] Rings are an animated `outline-offset`, not a scaled box: a scaled ring (or `overflow: clip` on `.vault-wrap`) changed the scroll size of small Vault windows.
+- Tested on the scratch site with a faked Vault (live Vault untouched): player and GM side by side, back-to-back alarms, locked Vault, minimised, hide/show, reload, corner boxes, full-screen, small window (scroll sizes identical with and without the alarm), phone 375 px, frozen frames at 9 moments rendered and looked at. Console clean. Test rows deleted.
+- Test-harness note: a fake scene id makes `get_strokes` return 401 on every sync after a hide/show (existing retry in `loadStrokes`); harmless, test only.
+- [x] Shipped: deployed `?v=38`.
+
 ## Round 35 (2026-11-14): Vault lock
 - [x] GM can lock the Vault for players: setting `vault_locked` (via `gm_set_settings`, no new table). While on, players still see the Vault when it's live but can't change any box; the GM still can (states, DANGER, Clear all boxes). The lock survives hiding/showing the Vault.
 - [x] Server: `supabase/v13.sql` makes `vault_set` raise `vault_locked` for players while the setting is true. Tested in a rolled-back transaction (hidden, unlocked, locked set/unmark, GM while locked, danger not leaked, player can't unlock, odd setting values, reset).

@@ -236,6 +236,7 @@ const S = {
   gmNotes: null,
   deleted: null,
   vaultMenu: null,
+  vaultAlarm: null,      // { code, by, state, at } while a DANGER box's alarm plays
   z: 40,
   tokenPick: lsGet('debt.tokpick') || '',  // 'gm' | 'sheet:<id>' | 'npc'
   npcName: '',
@@ -866,7 +867,11 @@ async function sync() {
     for (const id of [...S.strokesLoaded]) if (!S.live.some(s => s.id === id) && !isGM()) S.strokesLoaded.delete(id);
 
     const vaultVisible = S.live.some(s => s.kind === 'vault');
-    if (r.vault) for (const b of r.vault) { S.vault.set(b.code, b); vaultChanged = true; }
+    if (r.vault) for (const b of r.vault) {
+      const prev = S.vault.get(b.code);
+      S.vault.set(b.code, b); vaultChanged = true;
+      if (S.vaultLoaded && dangerUncovered(prev, b)) vaultAlarm(b);
+    }
     if (!vaultVisible && !isGM()) S.vaultLoaded = false;
     if ((vaultVisible || isGM()) && !S.vaultLoaded) { await loadVault(); vaultChanged = true; }
 
@@ -4129,12 +4134,52 @@ function vaultMiniHTML() {
 
 // ── Rendering: the Vault ───────────────────────────────────────────────────
 
+// Uncovering a DANGER box sets off a short alarm for everyone looking at the
+// Vault: the box flashes, the Vault's edge pulses red and a banner names the box.
+// The Vault redraws often, so the alarm lives in state and each redraw picks the
+// animation up where it was (a negative animation-delay, --va-d).
+const VAULT_ALARM_MS = 3200;
+let vaultAlarmTimer = null;
+const dangerUncovered = (prev, b) => !!(prev && !prev.state && b && b.state && b.danger);
+const vaultAlarmNow = () => (S.vaultAlarm && Date.now() - S.vaultAlarm.at < VAULT_ALARM_MS ? S.vaultAlarm : null);
+const vaultAlarmText = a => `DANGER: ${a.code} ${a.state === 'open' ? 'opened' : 'uncovered'}${a.by ? ' by ' + a.by : ''}`;
+function vaultAlarm(b) {
+  const a = S.vaultAlarm = { code: b.code, by: b.by || '', state: b.state, at: Date.now() };
+  clearTimeout(vaultAlarmTimer);
+  vaultAlarmTimer = setTimeout(() => { S.vaultAlarm = null; renderVaultViews(); }, VAULT_ALARM_MS + 150);
+  alarmBuzz();
+  // Nobody here is looking at the Vault (window minimised, GM on another page): say it in a toast.
+  setTimeout(() => {
+    if (S.vaultAlarm === a && ![...document.querySelectorAll('.vault-wrap')].some(el => el.offsetParent)) toast(vaultAlarmText(a), true);
+  }, 350);
+}
+// Three short buzzes, made on the fly. Follows the dice sound setting.
+function alarmBuzz() {
+  if (!S.sound) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    if (audioCtx.state !== 'running') return;
+    const t = audioCtx.currentTime;
+    [0, 0.2, 0.4].forEach((d, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'square'; o.frequency.value = i % 2 ? 466 : 622;
+      g.gain.setValueAtTime(0.0001, t + d);
+      g.gain.exponentialRampToValueAtTime(0.045, t + d + 0.015);
+      g.gain.setValueAtTime(0.045, t + d + 0.11);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.16);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(t + d); o.stop(t + d + 0.18);
+    });
+  } catch { /* no audio */ }
+}
+
 // The GM can lock the Vault: players still see it but can't change a box.
 const vaultLocked = () => !!S.settings.vault_locked;
 const vaultCanEdit = () => isGM() || !vaultLocked();
 
 function vaultHTML() {
-  const gm = isGM(), locked = vaultLocked(), canEdit = gm || !locked;
+  const gm = isGM(), locked = vaultLocked(), canEdit = gm || !locked, alarm = vaultAlarmNow();
   const rows = letters => letters.map(l => `
     <div class="v-row">
       <span class="v-letter">${l}</span>
@@ -4143,7 +4188,7 @@ function vaultHTML() {
         const st = b.state || '';
         // Players only learn about danger once the box is opened.
         const danger = b.danger && (gm || st);
-        return `<button class="v-box s-${st || 'none'} ${danger ? (st ? 'danger' : 'danger-hidden') : ''} ${S.vaultMenu === code ? 'menu-open' : ''}" data-act="vault-box" data-code="${code}" ${canEdit ? '' : 'aria-disabled="true"'}
+        return `<button class="v-box s-${st || 'none'} ${danger ? (st ? 'danger' : 'danger-hidden') : ''} ${S.vaultMenu === code ? 'menu-open' : ''} ${alarm && alarm.code === code && danger && st ? 'va-hit' : ''}" data-act="vault-box" data-code="${code}" ${canEdit ? '' : 'aria-disabled="true"'}
                   title="${code} · ${VAULT_STATES[st]}${danger ? ' · DANGER' : ''}${b.by && st ? ' · by ' + esc(b.by) : ''}">${danger ? WARN_SVG : ''}${code}</button>`;
       }).join('')}
     </div>`).join('');
@@ -4163,7 +4208,8 @@ function vaultHTML() {
       ${gm ? `<button class="btn sm danger" data-act="vault-danger" data-code="${S.vaultMenu}" data-v="${mb.danger ? 0 : 1}">${WARN_SVG} ${mb.danger ? 'Clear DANGER' : 'Mark DANGER'}</button>` : ''}
     </div>` : '';
   return `
-    <div class="vault-wrap ${canEdit ? '' : 'v-locked'}">
+    <div class="vault-wrap ${canEdit ? '' : 'v-locked'} ${alarm ? 'va-on' : ''}" ${alarm ? `style="--va-d:-${Date.now() - alarm.at}ms"` : ''}>
+      ${alarm ? `<div class="va-clip"><div class="va-ban">${WARN_SVG}<span>${esc(vaultAlarmText(alarm))}</span></div></div>` : ''}
       ${lockBar}
       <div class="vault-frame">
         <div class="v-title">VAULT</div>
@@ -5609,7 +5655,12 @@ document.addEventListener('click', async e => {
       S.vault.set(code, { ...(prev || {}), code, state, by: myName() });
       S.vaultMenu = null;
       renderVaultViews();
-      try { const b = await api('vault_set', { p_code: code, p_state: state }); S.vault.set(code, b); renderVaultViews(); ping(); }
+      try {
+        const b = await api('vault_set', { p_code: code, p_state: state });
+        S.vault.set(code, b);
+        if (dangerUncovered(prev, b)) vaultAlarm(b);
+        renderVaultViews(); ping();
+      }
       catch (err) { if (prev) S.vault.set(code, prev); renderVaultViews(); fail(err); }
       break;
     }
