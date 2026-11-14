@@ -760,11 +760,37 @@ document.addEventListener('pointerdown', () => {
 
 // ── Sync ───────────────────────────────────────────────────────────────────
 
+// Add newly bought lots to a Gear list the user is still editing: onto the row
+// with the same name, or as a new row. A list that already carries any lot of
+// an order has seen that whole order.
+function addLots(list, lots) {
+  const known = new Set();
+  for (const y of list) if (y && isObj(y.lots)) for (const o of Object.keys(y.lots)) known.add(o);
+  const key = n => String(n || '').trim().toLowerCase();
+  for (const { o, v, x } of lots) {
+    if (known.has(o)) continue;
+    const q = Math.max(0, Math.round(+(v && v[0])) || 0);
+    const y = key(x.name) && list.find(g => g && g.kind !== 'weapon' && key(g.name) === key(x.name));
+    if (y) {
+      const cur = y.qty == null || y.qty === '' || !Number.isFinite(+y.qty) ? 1 : Math.round(+y.qty);
+      y.qty = Math.min(999, Math.max(0, cur) + q);
+      y.lots = { ...(isObj(y.lots) ? y.lots : {}), [o]: v };
+    } else list.push({ ...clone(x), qty: q, lots: { [o]: v }, oid: +o });
+  }
+}
+
 function sheetRecord(rec) {
   const data = normalize(rec.data);
   // Items the shop has added (they carry an order id) that this browser hasn't seen yet.
   const seen = S.seenOids.get(rec.id) || new Set(), fresh = { gear: [], kit: [] };
-  for (const k of ['gear', 'kit']) for (const x of data[k]) if (x && x.oid != null && !seen.has(k + x.oid + '|' + x.name)) { fresh[k].push(x); seen.add(k + x.oid + '|' + x.name); }
+  for (const k of ['gear', 'kit']) for (const x of data[k]) if (x && x.oid != null && !isObj(x.lots) && !seen.has(k + x.oid + '|' + x.name)) { fresh[k].push(x); seen.add(k + x.oid + '|' + x.name); }
+  // Gear rows also remember what each shop order added to them (lots: { order: [qty, at] }),
+  // because a purchase can add to a row that already exists.
+  const lots = [], newOrders = new Set();
+  for (const x of data.gear) if (x && isObj(x.lots)) for (const [o, v] of Object.entries(x.lots)) {
+    if (!seen.has('lot' + o)) { newOrders.add(o); lots.push({ o, v, x }); }
+  }
+  for (const o of newOrders) seen.add('lot' + o);
   S.seenOids.set(rec.id, seen);
   // Keep what the user typed but hasn't been saved yet. If that is a whole
   // Gear or Kit list, add the newly bought items to it so the save can't drop them.
@@ -773,6 +799,7 @@ function sheetRecord(rec) {
       const have = new Set(p.value.map(x => x && x.oid != null ? x.oid + '|' + x.name : null));
       for (const x of fresh[p.path]) if (!have.has(x.oid + '|' + x.name)) p.value.push(clone(x));
     }
+    if (p.path === 'gear' && Array.isArray(p.value) && lots.length) addLots(p.value, lots);
     setPath(data, p.path, clone(p.value));
   }
   return { id: rec.id, data, sort: rec.sort, has_pass: rec.has_pass, updated_at: rec.updated_at, _json: JSON.stringify(data) };

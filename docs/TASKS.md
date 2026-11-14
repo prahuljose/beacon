@@ -20,12 +20,19 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 38 (2026-11-14): shop purchases merge into existing Gear rows
+- [x] `supabase/v15.sql` (migration `v15_gear_merge`). Buying an item adds to the first Gear item row with the same name (any capitals; bought or hand-typed; old "Padlock ×3" rows count as Padlock ×3 and are renamed). No match: a new row. Weapons, armor and apparel never merge.
+- [x] Each row records what each order added: `lots: { "<order id>": [qty, at] }`. `gm_shop_refund` takes back only that order's share (`private.gear_refund_row`): a hand-typed 2 + bought 5 goes back to 2; a row made only by that order is removed; pre-lots rows (`oid` only) still work.
+- [x] Save guard: `patch_sheet` calls `private.gear_keep_lots` on Gear, which puts back lots from the last 20 s that the saved list doesn't carry (onto the same-name row, else a new row). A list carrying any lot of an order has seen the whole order. Rows with lots skip the old oid+name guard; weapons and Kit still use it.
+- [x] Client (`addLots` in `sheetRecord`): the same rule for a Gear list the user is still editing when a purchase syncs in.
+- Tests: rolled-back transaction (two orders into hand-typed/legacy/v14 rows, bundle + same item, stale saves that missed one or both orders, up-to-date edit, old lots, refunds in both orders, money, patch_sheet permissions and other fields); browser mid-edit merge; then for real on a throwaway sheet in the dev room after applying: approve, out-of-date save, second order, both refunds, edit. Live function bodies checked byte-for-byte against the file (md5). Test rows deleted. Deployed `?v=40`.
+
 ## Round 37 (2026-11-14): Gear quantities
 - [x] Every Gear item (not weapons) has a quantity box beside its name (`gear.N.qty`, 0–999, default 1; `data-type="qty"` cleans the value as it is typed). Weapons have none.
 - [x] Shop (`supabase/v14.sql`, migration `v14_gear_quantities`): a bought item is one entry with `qty` instead of a name like "Crowbar ×5". A bundle name splits into its parts (`private.shop_parts`): "Cordless drill + 2 batteries" gives "Cordless drill" ×1 and "Battery" ×2 (×3 bought gives 3 and 6). Only parts after a " + " are read as "<count> <plural>". Same-name parts in one order are added together. Weapons, armor, apparel, refunds, stock and the chat line are unchanged.
 - [x] Old purchases named "Padlock ×3" are read as Padlock with quantity 3 on screen (`gearQty`, shop entries only); the stored sheet changes only when its owner next edits Gear. Hand-typed names ("6 rubber Bullets", "Box ×2") are left alone.
 - [x] Phones (≤560 px): Gear and Kit rows drop the row number so the name has room.
-- Not done (possible follow-up): buying the same item in a later order adds a second row; it is not merged into the existing row. Merging needs the refund and the 20 s save guard reworked.
+- Merging with rows the player already has: done in Round 38.
 - Tests: server in a rolled-back transaction (parts parsing incl. every live catalogue name, mixed order, weapons/armor, save guard, quantity edit, refund, not enough money), then a real dev-room order + refund on a throwaway sheet after applying. UI on a scratch site that can only write the throwaway sheet: old/new/hand-typed names, edits (empty, 0, 1000, negative, decimal), kind switch, add/delete, GM edit, read-only on a real sheet (nothing written), desktop 1024 and phone 375 (no overflow), all pages load, console clean. Test rows deleted. Deployed `?v=39`.
 
 ## Round 36 (2026-11-14): Vault danger alarm
