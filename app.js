@@ -183,6 +183,7 @@ const die = (px = 16) => DIE_SVG.replace('<svg', `<svg width="${px}" height="${p
 const REROLL_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>';
 const TRASH_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>';
 const EYE_OFF_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M17.9 17.9A10 10 0 0 1 12 20c-7 0-11-8-11-8a18 18 0 0 1 5.1-5.9"/><path d="M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.2 3.2"/><path d="M1 1l22 22"/></svg>';
+const LOCK_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg>';
 const WARN_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 1 21h22L12 2zm1 15h-2v2h2v-2zm0-7h-2v5h2v-5z"/></svg>';
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -284,6 +285,7 @@ const ERRORS = {
   not_yours: 'That isn’t your character.',
   gm_only: 'Only the GM can do that.',
   not_shown: 'That scene isn’t live right now.',
+  vault_locked: 'The GM has locked the Vault.',
   too_big: 'That is too big to save. Try a smaller picture.',
   too_short: 'Use at least 4 characters.',
   not_found: 'That no longer exists. It may have been deleted.',
@@ -815,7 +817,9 @@ async function sync() {
     let rollsChanged = false, crewChanged = false, liveChanged = false, vaultChanged = false, chatChanged = false, rulesChanged = false;
 
     if (r.grit !== S.grit || r.grit_open !== S.gritOpen || JSON.stringify(r.settings) !== JSON.stringify(S.settings)) {
+      const wasLocked = vaultLocked();
       S.grit = r.grit; S.gritOpen = r.grit_open; S.settings = r.settings || {}; crewChanged = true;
+      if (wasLocked !== vaultLocked()) { vaultChanged = true; if (!vaultCanEdit()) S.vaultMenu = null; }
     }
     if (r.rules_note !== S.rulesNote) { S.rulesNote = r.rules_note || ''; rulesChanged = true; }
     for (const rec of r.sheets) if (applySheet(rec)) changed.add(rec.id);
@@ -4083,13 +4087,14 @@ function scenesHTML() {
         <div class="scene-card-body">
           <input data-scene-field="title" data-id="${sc.id}" data-fk="st-${sc.id}" value="${esc(sc.title)}" placeholder="Title" aria-label="Scene title" class="scene-title-input">
           ${sc.kind === 'turns' ? '<p class="small dim">Built-in. Only you control it; players just watch. Edit it below or in its window.</p>'
-            : sc.kind === 'vault' ? '<p class="small dim">Built-in. Players can mark boxes while it’s live. Mark DANGER boxes from its box menu.</p>'
+            : sc.kind === 'vault' ? `<p class="small dim">${vaultLocked() ? '<b style="color:var(--brass)">Locked:</b> players can look but can’t change boxes. You still can.' : 'Built-in. Players can mark boxes while it’s live. Lock it to freeze the boxes for players.'} Mark DANGER boxes from its box menu.</p>`
             : `<textarea data-scene-field="caption" data-id="${sc.id}" data-fk="sc-${sc.id}" rows="2" placeholder="Caption (optional)" aria-label="Scene caption">${esc(sc.caption)}</textarea>`}
           <div class="row">
             <button class="btn sm ${sc.active ? '' : 'brass'}" data-act="scene-live" data-id="${sc.id}" data-v="${sc.active ? 0 : 1}">${sc.active ? 'Hide from players' : 'Show to players'}</button>
             ${sc.kind === 'turns' ? ''
               : sc.kind === 'vault'
-              ? `<button class="btn sm ghost" data-act="vault-reset">Clear all boxes</button>`
+              ? `<button class="btn sm ${vaultLocked() ? 'brass' : 'ghost'}" data-act="vault-lock" data-v="${vaultLocked() ? 0 : 1}">${vaultLocked() ? 'Unlock for players' : 'Lock for players'}</button>
+                 <button class="btn sm ghost" data-act="vault-reset">Clear all boxes</button>`
               : `<button class="btn sm ghost" data-act="scene-clear" data-id="${sc.id}">Clear markings</button>
                  <button class="btn sm ghost" data-act="scene-replace" data-id="${sc.id}">Replace image</button>
                  <button class="btn sm danger" data-act="scene-del" data-id="${sc.id}">Delete</button>`}
@@ -4124,8 +4129,12 @@ function vaultMiniHTML() {
 
 // ── Rendering: the Vault ───────────────────────────────────────────────────
 
+// The GM can lock the Vault: players still see it but can't change a box.
+const vaultLocked = () => !!S.settings.vault_locked;
+const vaultCanEdit = () => isGM() || !vaultLocked();
+
 function vaultHTML() {
-  const gm = isGM();
+  const gm = isGM(), locked = vaultLocked(), canEdit = gm || !locked;
   const rows = letters => letters.map(l => `
     <div class="v-row">
       <span class="v-letter">${l}</span>
@@ -4134,21 +4143,28 @@ function vaultHTML() {
         const st = b.state || '';
         // Players only learn about danger once the box is opened.
         const danger = b.danger && (gm || st);
-        return `<button class="v-box s-${st || 'none'} ${danger ? (st ? 'danger' : 'danger-hidden') : ''} ${S.vaultMenu === code ? 'menu-open' : ''}" data-act="vault-box" data-code="${code}"
+        return `<button class="v-box s-${st || 'none'} ${danger ? (st ? 'danger' : 'danger-hidden') : ''} ${S.vaultMenu === code ? 'menu-open' : ''}" data-act="vault-box" data-code="${code}" ${canEdit ? '' : 'aria-disabled="true"'}
                   title="${code} · ${VAULT_STATES[st]}${danger ? ' · DANGER' : ''}${b.by && st ? ' · by ' + esc(b.by) : ''}">${danger ? WARN_SVG : ''}${code}</button>`;
       }).join('')}
     </div>`).join('');
   const counts = { open: 0, progress: 0, complete: 0 };
   for (const b of S.vault.values()) if (counts[b.state] != null) counts[b.state]++;
   const mb = S.vaultMenu && (S.vault.get(S.vaultMenu) || {});
-  const menu = S.vaultMenu ? `
+  const lockBar = gm
+    ? `<div class="v-lock ${locked ? 'on' : ''}">
+        <span>${locked ? `${LOCK_SVG} Locked. Players can’t change boxes; you still can.` : 'Players can mark boxes while the Vault is live.'}</span>
+        <button class="btn sm ${locked ? 'brass' : ''}" data-act="vault-lock" data-v="${locked ? 0 : 1}">${locked ? 'Unlock for players' : `${LOCK_SVG} Lock for players`}</button>
+      </div>`
+    : locked ? `<div class="v-lock on"><span>${LOCK_SVG} Locked by the GM. You can look, but boxes can’t be changed right now.</span></div>` : '';
+  const menu = S.vaultMenu && canEdit ? `
     <div class="v-menu" role="menu" aria-label="Mark ${S.vaultMenu}">
       <b>${S.vaultMenu}</b>
       ${Object.entries(VAULT_STATES).map(([k, v]) => `<button class="btn sm v-opt s-${k || 'none'}" data-act="vault-set" data-code="${S.vaultMenu}" data-state="${k}">${k ? '' : '× '}${v}</button>`).join('')}
       ${gm ? `<button class="btn sm danger" data-act="vault-danger" data-code="${S.vaultMenu}" data-v="${mb.danger ? 0 : 1}">${WARN_SVG} ${mb.danger ? 'Clear DANGER' : 'Mark DANGER'}</button>` : ''}
     </div>` : '';
   return `
-    <div class="vault-wrap">
+    <div class="vault-wrap ${canEdit ? '' : 'v-locked'}">
+      ${lockBar}
       <div class="vault-frame">
         <div class="v-title">VAULT</div>
         <div class="vault">
@@ -5580,12 +5596,14 @@ document.addEventListener('click', async e => {
 
     // Vault
     case 'vault-box': {
+      if (!vaultCanEdit()) { S.vaultMenu = null; toast(ERRORS.vault_locked, true); break; }
       const code = el.dataset.code;
       S.vaultMenu = S.vaultMenu === code ? null : code;
       renderVaultViews();
       break;
     }
     case 'vault-set': {
+      if (!vaultCanEdit()) { S.vaultMenu = null; renderVaultViews(); toast(ERRORS.vault_locked, true); break; }
       const code = el.dataset.code, state = el.dataset.state;
       const prev = S.vault.get(code);
       S.vault.set(code, { ...(prev || {}), code, state, by: myName() });
@@ -5600,6 +5618,18 @@ document.addEventListener('click', async e => {
       S.vault.set(code, { ...(S.vault.get(code) || { code, state: '' }), danger: on });
       S.vaultMenu = null; renderVaultViews();
       try { await api('gm_vault_danger', { p_code: code, p_danger: on }); ping(); } catch (err) { fail(err); }
+      break;
+    }
+    case 'vault-lock': {
+      if (!isGM()) break;
+      const on = el.dataset.v === '1';
+      el.disabled = true;
+      try {
+        S.settings = await api('gm_set_settings', { p_settings: { vault_locked: on } }); ping();
+        if (S.route.view === 'scenes') renderMain();
+        renderVaultViews();
+        toast(on ? 'Vault locked. Players can’t change boxes.' : 'Vault unlocked. Players can mark boxes again.');
+      } catch (err) { el.disabled = false; fail(err); }
       break;
     }
     case 'vault-reset': {

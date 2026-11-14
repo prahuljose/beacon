@@ -20,6 +20,13 @@ Incident (2026-10-17): an API test overwrote BOBO's job and notes (now
 blank) and used up BOBO's Wear (restored to 1). Grit was reset to 5. The user
 has been told.
 
+## Round 35 (2026-11-14): Vault lock
+- [x] GM can lock the Vault for players: setting `vault_locked` (via `gm_set_settings`, no new table). While on, players still see the Vault when it's live but can't change any box; the GM still can (states, DANGER, Clear all boxes). The lock survives hiding/showing the Vault.
+- [x] Server: `supabase/v13.sql` makes `vault_set` raise `vault_locked` for players while the setting is true. Tested in a rolled-back transaction (hidden, unlocked, locked set/unmark, GM while locked, danger not leaked, player can't unlock, odd setting values, reset).
+- [x] Client: "Lock for players / Unlock for players" on the Vault card, in the Vault editor and in the GM's Vault window (`.v-lock`); players get a "Locked by the GM" note, no box menu, and a toast if they click. A lock arriving mid-click closes the menu; a server refusal reverts the box.
+- Tested on a scratch site with a faked Vault (live Vault, settings and players untouched): GM and player side by side, console clean, other pages load.
+- [x] Shipped: `v13.sql` applied (migration `v13_vault_lock`), deployed `?v=37`.
+
 ## Round 34 (2026-11-01): presence rate limit fix
 - [x] Supabase logged `ClientPresenceRateLimitReached` (a tab sending presence too often gets its channel closed). Real cases: the GM logging out and straight back in (about six updates in five seconds), switching tabs twice in a few seconds (each switch sent ~3), and jukebox changes while switching tabs. Causes: every 10 s music poll re-sent presence even when nothing changed, a tab return sent it twice, the watchdog re-sent while an update was still on its way, nothing collapsed bursts.
 - [x] All presence now goes through one queue (`queuePresence`): sent only if it differs from the last update, at most once every 3 s (`PRESENCE_GAP`), with the latest state; a new or rejoined channel always sends once; the watchdog only re-sends a missing/stale entry after 10 s of quiet; logging out resets the queue.
